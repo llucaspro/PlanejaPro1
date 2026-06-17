@@ -1,17 +1,20 @@
 import { Link, useLocation } from "wouter";
-import { 
-  BookOpen, 
-  PlusCircle, 
-  FolderOpen, 
-  MessageSquare, 
-  Upload, 
+import {
+  BookOpen,
+  PlusCircle,
+  FolderOpen,
+  MessageSquare,
+  Upload,
   Settings,
   Menu,
-  X
+  X,
+  LogOut,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "./ui/sheet";
+import { useAuth } from "@/contexts/auth-context";
+import { toast } from "sonner";
 
 const NAV_ITEMS = [
   { href: "/", label: "Início", icon: BookOpen },
@@ -24,10 +27,23 @@ const NAV_ITEMS = [
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { user, logout } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success("Você saiu da conta.");
+    } catch {
+      toast.error("Erro ao sair. Tente novamente.");
+    }
+  };
+
+  const displayName = user?.displayName || user?.email?.split("@")[0] || "Professor";
+  const initials = displayName.slice(0, 2).toUpperCase();
 
   const NavLinks = () => (
-    <>
-      <div className="space-y-1 py-4">
+    <div className="flex flex-col flex-1">
+      <div className="space-y-1 py-4 flex-1">
         {NAV_ITEMS.map((item) => {
           const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
           const Icon = item.icon;
@@ -48,7 +64,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           );
         })}
       </div>
-      <div className="mt-auto py-4">
+
+      <div className="py-4 space-y-1 border-t">
         <Link href="/configuracoes">
           <div
             className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer ${
@@ -62,8 +79,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <span>Configurações</span>
           </div>
         </Link>
+
+        <div className="flex items-center gap-3 px-3 py-2 rounded-md">
+          <div className="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+            {initials}
+          </div>
+          <span className="text-sm text-foreground truncate flex-1">{displayName}</span>
+          <button
+            onClick={handleLogout}
+            className="text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
+            title="Sair"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
       </div>
-    </>
+    </div>
   );
 
   return (

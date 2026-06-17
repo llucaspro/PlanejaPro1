@@ -1,10 +1,12 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Layout } from "@/components/layout";
 import { AnimatePresence } from "framer-motion";
+import { AuthProvider, useAuth } from "@/contexts/auth-context";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import Home from "@/pages/home";
 import NovoPlanejamento from "@/pages/novo-planejamento";
@@ -13,6 +15,8 @@ import Salvos from "@/pages/salvos";
 import Assistente from "@/pages/assistente";
 import Importar from "@/pages/importar";
 import Configuracoes from "@/pages/configuracoes";
+import Login from "@/pages/login";
+import Cadastro from "@/pages/cadastro";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -22,7 +26,35 @@ const queryClient = new QueryClient({
   },
 });
 
-function Router() {
+function LoadingScreen() {
+  return (
+    <div className="min-h-[100dvh] flex items-center justify-center bg-background">
+      <div className="space-y-3 w-48">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-1/2" />
+      </div>
+    </div>
+  );
+}
+
+function AppRoutes() {
+  const { user, loading } = useAuth();
+
+  if (loading) return <LoadingScreen />;
+
+  if (!user) {
+    return (
+      <Switch>
+        <Route path="/login" component={Login} />
+        <Route path="/cadastro" component={Cadastro} />
+        <Route>
+          <Redirect to="/login" />
+        </Route>
+      </Switch>
+    );
+  }
+
   return (
     <Layout>
       <AnimatePresence mode="wait">
@@ -34,6 +66,12 @@ function Router() {
           <Route path="/assistente" component={Assistente} />
           <Route path="/importar" component={Importar} />
           <Route path="/configuracoes" component={Configuracoes} />
+          <Route path="/login">
+            <Redirect to="/" />
+          </Route>
+          <Route path="/cadastro">
+            <Redirect to="/" />
+          </Route>
           <Route component={NotFound} />
         </Switch>
       </AnimatePresence>
@@ -46,10 +84,12 @@ function App() {
     <ThemeProvider defaultTheme="light" storageKey="planejapro-theme">
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
-          </WouterRouter>
-          <Toaster position="top-right" richColors />
+          <AuthProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <AppRoutes />
+            </WouterRouter>
+            <Toaster position="top-right" richColors />
+          </AuthProvider>
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>
