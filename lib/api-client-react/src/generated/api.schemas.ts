@@ -94,3 +94,69 @@ export interface ChatResponse {
   message: string;
 }
 
+export interface ExamInput {
+  /** Nome da escola */
+  nomeEscola?: string;
+  /** Nome do professor */
+  nomeProfessor?: string;
+  /** Disciplina da prova */
+  disciplina: string;
+  /** Ano/Série */
+  anoSerie: string;
+  /** Turma */
+  turma?: string;
+  /** Bimestre/Trimestre (ex. 1º Bimestre) */
+  bimestre?: string;
+  /** Conteúdo que será cobrado na prova */
+  conteudo: string;
+  /**
+   * Número de questões discursivas (0 a 8)
+   * @minimum 0
+   * @maximum 8
+   */
+  questoesDiscursivas: number;
+  /**
+   * Número de questões de múltipla escolha (0 a 20)
+   * @minimum 0
+   * @maximum 20
+   */
+  questoesAlternativas: number;
+  /** Instruções adicionais para os alunos */
+  instrucoes?: string;
+  /** Valor total da prova em pontos */
+  valorTotal?: number;
+}
+
+export interface ExamAlternativaOptions {
+  a: string;
+  b: string;
+  c: string;
+  d: string;
+  e: string;
+}
+
+export interface ExamAlternativa {
+  numero: number;
+  enunciado: string;
+  alternativas: ExamAlternativaOptions;
+  /** Letra da resposta correta (a, b, c, d ou e) */
+  gabarito: string;
+  valor?: number;
+}
+
+export interface ExamDiscursiva {
+  numero: number;
+  enunciado: string;
+  /** Número de linhas sugeridas para resposta */
+  linhasResposta?: number;
+  valor: number;
+  /** Critérios de correção */
+  criterios?: string;
+}
+
+export interface GeneratedExam {
+  titulo: string;
+  instrucoes: string;
+  questoesAlternativas: ExamAlternativa[];
+  questoesDiscursivas: ExamDiscursiva[];
+}
