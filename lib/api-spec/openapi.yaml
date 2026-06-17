@@ -14,6 +14,8 @@ tags:
     description: Geração de planejamento pedagógico com IA
   - name: assistant
     description: Assistente pedagógico conversacional
+  - name: exam
+    description: Criação de provas com IA
 
 paths:
   /healthz:
@@ -83,6 +85,38 @@ paths:
                 $ref: "#/components/schemas/ChatResponse"
         "400":
           description: Mensagem inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Erro interno / falha na IA
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /exam/generate:
+    post:
+      operationId: generateExam
+      tags: [exam]
+      summary: Gera prova completa com IA
+      description: Recebe parâmetros da prova e retorna questões geradas pela IA prontas para impressão
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExamInput"
+      responses:
+        "200":
+          description: Prova gerada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratedExam"
+        "400":
+          description: Dados inválidos
           content:
             application/json:
               schema:
@@ -276,3 +310,123 @@ components:
         message:
           type: string
           description: Resposta do assistente pedagógico
+
+    ExamInput:
+      type: object
+      required:
+        - disciplina
+        - anoSerie
+        - conteudo
+        - questoesDiscursivas
+        - questoesAlternativas
+      properties:
+        nomeEscola:
+          type: string
+          description: Nome da escola
+        nomeProfessor:
+          type: string
+          description: Nome do professor
+        disciplina:
+          type: string
+          description: Disciplina da prova
+        anoSerie:
+          type: string
+          description: Ano/Série
+        turma:
+          type: string
+          description: Turma
+        bimestre:
+          type: string
+          description: Bimestre/Trimestre (ex. 1º Bimestre)
+        conteudo:
+          type: string
+          description: Conteúdo que será cobrado na prova
+        questoesDiscursivas:
+          type: integer
+          minimum: 0
+          maximum: 8
+          description: Número de questões discursivas (0 a 8)
+        questoesAlternativas:
+          type: integer
+          minimum: 0
+          maximum: 20
+          description: Número de questões de múltipla escolha (0 a 20)
+        instrucoes:
+          type: string
+          description: Instruções adicionais para os alunos
+        valorTotal:
+          type: number
+          description: Valor total da prova em pontos
+
+    ExamAlternativa:
+      type: object
+      required:
+        - numero
+        - enunciado
+        - alternativas
+        - gabarito
+      properties:
+        numero:
+          type: integer
+        enunciado:
+          type: string
+        alternativas:
+          type: object
+          required: [a, b, c, d, e]
+          properties:
+            a:
+              type: string
+            b:
+              type: string
+            c:
+              type: string
+            d:
+              type: string
+            e:
+              type: string
+        gabarito:
+          type: string
+          description: Letra da resposta correta (a, b, c, d ou e)
+        valor:
+          type: number
+
+    ExamDiscursiva:
+      type: object
+      required:
+        - numero
+        - enunciado
+        - valor
+      properties:
+        numero:
+          type: integer
+        enunciado:
+          type: string
+        linhasResposta:
+          type: integer
+          description: Número de linhas sugeridas para resposta
+        valor:
+          type: number
+        criterios:
+          type: string
+          description: Critérios de correção
+
+    GeneratedExam:
+      type: object
+      required:
+        - titulo
+        - instrucoes
+        - questoesAlternativas
+        - questoesDiscursivas
+      properties:
+        titulo:
+          type: string
+        instrucoes:
+          type: string
+        questoesAlternativas:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExamAlternativa"
+        questoesDiscursivas:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExamDiscursiva"
