@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "sonner";
 
-const WHATSAPP_NUMBER = "5511999999999";
+const WHATSAPP_NUMBER = "5514997966714";
 const WHATSAPP_MSG = encodeURIComponent("Olá! Quero liberar meu acesso completo ao PlanejaPro.");
 const CONTACT_EMAIL = "contato@planejapro.com.br";
 
