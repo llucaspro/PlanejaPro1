@@ -6,21 +6,28 @@ import { verifyToken, extractBearerToken } from "../_lib/auth";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
-const SYSTEM_PROMPT = `Você é um especialista em elaboração de avaliações escolares brasileiras.
-Você cria provas de alta qualidade, pedagogicamente adequadas, com questões claras e bem formuladas.
-
-REGRAS:
-- Questões de múltipla escolha: 5 alternativas (a, b, c, d, e), apenas uma correta
-- Questões discursivas: enunciados claros que exigem reflexão e desenvolvimento
-- Linguagem adequada para o nível de ensino indicado
-- Conteúdo fiel ao tema solicitado
-- Gabarito correto e justo
-- Responda APENAS com JSON válido, sem markdown, sem blocos de código`;
-
 function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
+
+/** Remove markdown fences, JS comments, trailing commas — makes Gemini JSON parseable */
+function cleanJson(raw: string): string {
+  let s = raw.trim();
+  // strip ```json ... ``` or ``` ... ```
+  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  // find first { and last }
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start !== -1 && end !== -1) s = s.slice(start, end + 1);
+  // remove single-line // comments (not inside strings)
+  s = s.replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g, (m, str) => str ?? "");
+  // remove multi-line /* */ comments
+  s = s.replace(/("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\//g, (m, str) => str ?? "");
+  // remove trailing commas before ] or }
+  s = s.replace(/,\s*([}\]])/g, "$1");
+  return s;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -40,10 +47,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const db = getDb();
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId));
-
   if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
   if (!user.isActive) return res.status(403).json({ error: "Conta bloqueada" });
-
   if (!user.isPremium && user.freeGenerationsRemaining <= 0) {
     return res.status(403).json({ error: "Seu período gratuito terminou.", code: "FREE_LIMIT_REACHED" });
   }
@@ -53,93 +58,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "Campos obrigatórios: disciplina, conteudo, anoSerie" });
   }
 
-  const nAlt: number = Math.min(Math.max(parseInt(body.questoesAlternativas ?? "10"), 0), 20);
-  const nDisc: number = Math.min(Math.max(parseInt(body.questoesDiscursivas ?? "2"), 0), 8);
-  const totalQuestoes = nAlt + nDisc;
+  const nAlt = Math.min(Math.max(Number(body.questoesAlternativas ?? 10), 0), 20);
+  const nDisc = Math.min(Math.max(Number(body.questoesDiscursivas ?? 2), 0), 8);
+  if (nAlt + nDisc === 0) return res.status(400).json({ error: "A prova deve ter ao menos uma questão." });
 
-  if (totalQuestoes === 0) {
-    return res.status(400).json({ error: "A prova deve ter ao menos uma questão." });
-  }
+  const valorTotal = parseFloat(body.valorTotal ?? "10") || 10;
+  const valorAlt = nAlt > 0 ? parseFloat((valorTotal * (nDisc > 0 ? 0.6 : 1) / nAlt).toFixed(2)) : 0;
+  const valorDisc = nDisc > 0 ? parseFloat((valorTotal * (nAlt > 0 ? 0.4 : 1) / nDisc).toFixed(2)) : 0;
 
-  const valorTotal: number = parseFloat(body.valorTotal ?? "10");
+  const prompt = `Você é um professor especialista. Crie uma prova escolar em JSON puro (sem markdown, sem comentários).
 
-  let valorAlt = 0;
-  let valorDisc = 0;
-  if (nAlt > 0 && nDisc > 0) {
-    valorAlt = parseFloat((valorTotal * 0.6 / nAlt).toFixed(2));
-    valorDisc = parseFloat((valorTotal * 0.4 / nDisc).toFixed(2));
-  } else if (nAlt > 0) {
-    valorAlt = parseFloat((valorTotal / nAlt).toFixed(2));
-  } else {
-    valorDisc = parseFloat((valorTotal / nDisc).toFixed(2));
-  }
-
-  const prompt = `Crie uma prova escolar completa com os seguintes parâmetros:
-
-DADOS DA PROVA:
+Dados:
 - Disciplina: ${body.disciplina}
 - Ano/Série: ${body.anoSerie}
 - Turma: ${body.turma ?? "não especificada"}
-- Conteúdo cobrado: ${body.conteudo}
-- Questões de múltipla escolha: ${nAlt} (valor cada: ${valorAlt} pontos)
-- Questões discursivas: ${nDisc} (valor cada: ${valorDisc} pontos)
-- Instruções extras: ${body.instrucoes ?? "nenhuma"}
+- Conteúdo: ${body.conteudo}
+- Instruções especiais: ${body.instrucoes ?? "nenhuma"}
+- Questões de múltipla escolha: ${nAlt} (${valorAlt} pts cada)
+- Questões discursivas: ${nDisc} (${valorDisc} pts cada)
 
-Retorne EXATAMENTE este JSON (sem markdown, apenas JSON puro):
-{
-  "titulo": "título da prova",
-  "instrucoes": "instruções gerais para o aluno (leia atentamente, use caneta azul/preta, etc.)",
-  "questoesAlternativas": [
-    {
-      "numero": 1,
-      "enunciado": "enunciado completo da questão",
-      "alternativas": {
-        "a": "texto da alternativa A",
-        "b": "texto da alternativa B",
-        "c": "texto da alternativa C",
-        "d": "texto da alternativa D",
-        "e": "texto da alternativa E"
-      },
-      "gabarito": "letra correta (a, b, c, d ou e)",
-      "valor": ${valorAlt}
-    }
-  ],
-  "questoesDiscursivas": [
-    {
-      "numero": ${nAlt + 1},
-      "enunciado": "enunciado completo da questão discursiva",
-      "linhasResposta": 6,
-      "valor": ${valorDisc},
-      "criterios": "critérios resumidos de correção"
-    }
-  ]
-}
+Responda SOMENTE com JSON válido neste formato exato (sem texto antes ou depois):
+{"titulo":"...","instrucoes":"...","questoesAlternativas":[{"numero":1,"enunciado":"...","alternativas":{"a":"...","b":"...","c":"...","d":"...","e":"..."},"gabarito":"a","valor":${valorAlt}}],"questoesDiscursivas":[{"numero":${nAlt + 1},"enunciado":"...","linhasResposta":6,"valor":${valorDisc},"criterios":"..."}]}
 
-Gere EXATAMENTE ${nAlt} questões de múltipla escolha e ${nDisc} questões discursivas.
-Se algum tipo for 0, retorne array vazio para aquele tipo.`;
+IMPORTANTE: gere exatamente ${nAlt} questões de múltipla escolha e ${nDisc} discursivas. Arrays vazios se o número for 0. Apenas JSON puro.`;
 
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: SYSTEM_PROMPT + "\n\n" + prompt }] }],
-      config: { maxOutputTokens: 8192, temperature: 0.7 },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: { maxOutputTokens: 8192, temperature: 0.6 },
     });
 
-    let content = response.text ?? "";
-    content = content.trim();
-    if (content.startsWith("```")) {
-      content = content.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-    }
-    if (!content) return res.status(500).json({ error: "IA não retornou conteúdo" });
+    const raw = response.text ?? "";
+    if (!raw.trim()) return res.status(500).json({ error: "IA não retornou conteúdo" });
 
-    const exam = JSON.parse(content);
+    let exam: Record<string, unknown>;
+    try {
+      exam = JSON.parse(cleanJson(raw));
+    } catch (parseErr) {
+      return res.status(500).json({ error: "IA retornou JSON inválido. Tente novamente." });
+    }
 
     if (!Array.isArray(exam.questoesAlternativas)) exam.questoesAlternativas = [];
     if (!Array.isArray(exam.questoesDiscursivas)) exam.questoesDiscursivas = [];
     if (typeof exam.titulo !== "string") exam.titulo = `Prova de ${body.disciplina}`;
     if (typeof exam.instrucoes !== "string") exam.instrucoes = "Leia atentamente cada questão antes de responder.";
 
-    const estimatedTokens = Math.round((SYSTEM_PROMPT.length + prompt.length + JSON.stringify(exam).length) / 4);
+    const estimatedTokens = Math.round((prompt.length + JSON.stringify(exam).length) / 4);
 
     if (!user.isPremium) {
       await db.update(usersTable)
@@ -147,11 +112,7 @@ Se algum tipo for 0, retorne array vazio para aquele tipo.`;
         .where(eq(usersTable.id, user.id));
     }
 
-    await db.insert(aiUsageTable).values({
-      userId: user.id,
-      requestType: "exam_generate",
-      estimatedTokens,
-    });
+    await db.insert(aiUsageTable).values({ userId: user.id, requestType: "exam_generate", estimatedTokens });
 
     return res.status(200).json({
       ...exam,
