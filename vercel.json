@@ -3,6 +3,11 @@
   "installCommand": "pnpm install",
   "buildCommand": "pnpm --filter @workspace/planejapro run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]

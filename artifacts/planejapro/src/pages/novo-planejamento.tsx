@@ -296,9 +296,14 @@ export default function NovoPlanejamento() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="text-center text-sm text-muted-foreground"
+              className="text-center space-y-2"
             >
-              A IA está trabalhando no seu planejamento. Isso pode levar até 30 segundos...
+              <p className="text-sm text-muted-foreground">
+                A IA está criando seu planejamento completo. Isso pode levar até 60 segundos...
+              </p>
+              <p className="text-xs text-muted-foreground/70">
+                Por favor, aguarde e não feche ou atualize a página.
+              </p>
             </motion.div>
           )}
         </form>
