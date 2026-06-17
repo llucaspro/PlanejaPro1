@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Download, Save, Copy, ArrowLeft, Shield, CheckCircle,
   FileText, ChevronDown, ChevronUp, Loader2, FileQuestion,
+  Sparkles, X, Clock, BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { usePlannings } from "@/hooks/use-plannings";
+import { useAuth } from "@/contexts/auth-context";
 import type { GeneratedPlanning, PlanningInput } from "@workspace/api-client-react";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -447,13 +449,41 @@ async function generateAndDownloadPdf(planning: GeneratedPlanning, input: Planni
 
 // ── Page Component ────────────────────────────────────────────────────────────
 
+const MELHORIA_FOCOS = [
+  { value: "dinamicas", label: "Dinâmicas de grupo", emoji: "🎯" },
+  { value: "jogos", label: "Gamificação e jogos", emoji: "🎮" },
+  { value: "praticas", label: "Atividades práticas", emoji: "🔬" },
+  { value: "metodologias", label: "Metodologias ativas", emoji: "💡" },
+  { value: "sala_invertida", label: "Sala de aula invertida", emoji: "🔄" },
+  { value: "colaborativa", label: "Aprendizagem colaborativa", emoji: "🤝" },
+];
+
+interface MelhoriaResult {
+  foco: string;
+  resumoMelhorias: string;
+  sugestoes: Array<{
+    titulo: string;
+    descricao: string;
+    tempo: string;
+    materiais: string[];
+    beneficios: string[];
+    comoImplementar: string;
+  }>;
+  dicasProfessor: string[];
+}
+
 export default function Resultado() {
   const [, navigate] = useLocation();
   const [planning, setPlanning] = useState<GeneratedPlanning | null>(null);
   const [input, setInput] = useState<PlanningInput | null>(null);
   const [saved, setSaved] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [showMelhoria, setShowMelhoria] = useState(false);
+  const [melhoriaFoco, setMelhoriaFoco] = useState("dinamicas");
+  const [melhoriaLoading, setMelhoriaLoading] = useState(false);
+  const [melhoriaResult, setMelhoriaResult] = useState<MelhoriaResult | null>(null);
   const { savePlanning } = usePlannings();
+  const { token } = useAuth();
 
   useEffect(() => {
     const resultStr = sessionStorage.getItem("planejapro_result");
@@ -515,6 +545,29 @@ export default function Resultado() {
     if (!planning) return;
     navigator.clipboard.writeText(toStr(planning.versaoResumida));
     toast.success("Resumo copiado para a área de transferência!");
+  };
+
+  const handleMelhorar = async () => {
+    if (!planning) return;
+    setMelhoriaLoading(true);
+    setMelhoriaResult(null);
+    try {
+      const res = await fetch("/api/planning/improve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          foco: melhoriaFoco,
+          planejamento: JSON.stringify(planning).slice(0, 2000),
+        }),
+      });
+      const json = await res.json() as MelhoriaResult & { error?: string };
+      if (!res.ok) throw new Error(json.error || "Erro ao gerar sugestões");
+      setMelhoriaResult(json);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao gerar sugestões");
+    } finally {
+      setMelhoriaLoading(false);
+    }
   };
 
   if (!planning) {
@@ -589,9 +642,123 @@ export default function Resultado() {
               <FileQuestion className="h-4 w-4" />
               Criar Prova
             </Button>
+            <Button
+              size="sm"
+              variant="default"
+              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => { setShowMelhoria(!showMelhoria); setMelhoriaResult(null); }}
+            >
+              <Sparkles className="h-4 w-4" />
+              Melhorar Aula
+            </Button>
           </div>
         </div>
       </div>
+
+      {/* Painel Melhorar Aula */}
+      <AnimatePresence>
+        {showMelhoria && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-6"
+          >
+            <Card className="border-emerald-200 dark:border-emerald-800">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                    <Sparkles className="h-4 w-4" /> Melhorar Aula com IA
+                  </CardTitle>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowMelhoria(false)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Escolha um foco e a IA vai sugerir melhorias práticas para esta aula</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {MELHORIA_FOCOS.map((f) => (
+                    <button
+                      key={f.value}
+                      onClick={() => setMelhoriaFoco(f.value)}
+                      className={`p-2.5 rounded-lg border-2 text-left text-sm transition-all ${
+                        melhoriaFoco === f.value
+                          ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 ring-2 ring-emerald-300"
+                          : "border-border hover:border-emerald-300"
+                      }`}
+                    >
+                      <span className="mr-1">{f.emoji}</span> {f.label}
+                    </button>
+                  ))}
+                </div>
+                <Button
+                  className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
+                  onClick={handleMelhorar}
+                  disabled={melhoriaLoading}
+                >
+                  {melhoriaLoading ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Gerando sugestões...</>
+                  ) : (
+                    <><Sparkles className="h-4 w-4" /> Gerar sugestões de melhoria</>
+                  )}
+                </Button>
+
+                {melhoriaResult && (
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3 pt-2">
+                    <p className="text-sm text-emerald-800 dark:text-emerald-200 font-medium">
+                      {melhoriaResult.resumoMelhorias}
+                    </p>
+                    {melhoriaResult.sugestoes.map((s, i) => (
+                      <div key={i} className="bg-muted/50 rounded-lg p-3 space-y-2">
+                        <p className="font-semibold text-sm">{s.titulo}</p>
+                        <p className="text-sm text-muted-foreground">{s.descricao}</p>
+                        {s.comoImplementar && (
+                          <div className="bg-background rounded p-2">
+                            <p className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-1">
+                              <BookOpen className="h-3 w-3" /> Como implementar
+                            </p>
+                            <p className="text-xs text-foreground">{s.comoImplementar}</p>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {s.tempo && (
+                            <Badge variant="secondary" className="text-xs gap-1">
+                              <Clock className="h-3 w-3" /> {s.tempo}
+                            </Badge>
+                          )}
+                          {s.materiais?.map((m) => (
+                            <Badge key={m} variant="outline" className="text-xs">{m}</Badge>
+                          ))}
+                        </div>
+                        {s.beneficios?.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {s.beneficios.map((b) => (
+                              <span key={b} className="text-xs text-emerald-700 dark:text-emerald-400">✓ {b}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {melhoriaResult.dicasProfessor?.length > 0 && (
+                      <div className="bg-amber-50 dark:bg-amber-950/20 rounded-lg p-3">
+                        <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 mb-2">💡 Dicas para o professor</p>
+                        <ul className="space-y-1">
+                          {melhoriaResult.dicasProfessor.map((d, i) => (
+                            <li key={i} className="text-xs text-foreground flex gap-1.5">
+                              <span className="text-amber-500">•</span> {d}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Aviso */}
       <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-6 flex gap-2">

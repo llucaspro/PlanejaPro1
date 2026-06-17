@@ -45,6 +45,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .orderBy(desc(count(aiUsageTable.id)))
       .limit(5);
 
+    const byType = await db
+      .select({
+        requestType: aiUsageTable.requestType,
+        total: count(aiUsageTable.id),
+      })
+      .from(aiUsageTable)
+      .groupBy(aiUsageTable.requestType)
+      .orderBy(desc(count(aiUsageTable.id)));
+
+    const generationsByType: Record<string, number> = {};
+    for (const row of byType) {
+      generationsByType[row.requestType] = row.total;
+    }
+
     return res.status(200).json({
       totalUsers: totalUsers.count,
       activeUsers: activeUsers.count,
@@ -54,6 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totalGenerations: totalGenerations.count,
       estimatedTokens: totalTokens.total ?? 0,
       topUsers,
+      generationsByType,
     });
   } catch {
     return res.status(401).json({ error: "Token inválido" });

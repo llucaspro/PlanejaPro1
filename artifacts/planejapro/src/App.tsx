@@ -21,6 +21,11 @@ import Upgrade from "@/pages/upgrade";
 import Admin from "@/pages/admin";
 import CriarProva from "@/pages/criar-prova";
 import ProvaResultado from "@/pages/prova-resultado";
+import Atividades from "@/pages/atividades";
+import Adaptar from "@/pages/adaptar";
+import BancoQuestoes from "@/pages/banco-questoes";
+import SequenciaDidatica from "@/pages/sequencia-didatica";
+import Relatorios from "@/pages/relatorios";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -88,6 +93,11 @@ function AppRoutes() {
           <Route path="/configuracoes" component={Configuracoes} />
           <Route path="/criar-prova" component={CriarProva} />
           <Route path="/prova-resultado" component={ProvaResultado} />
+          <Route path="/atividades" component={Atividades} />
+          <Route path="/adaptar" component={Adaptar} />
+          <Route path="/banco-questoes" component={BancoQuestoes} />
+          <Route path="/sequencia-didatica" component={SequenciaDidatica} />
+          <Route path="/relatorios" component={Relatorios} />
           {user.isAdmin && <Route path="/admin" component={Admin} />}
           <Route path="/login">
             <Redirect to="/" />

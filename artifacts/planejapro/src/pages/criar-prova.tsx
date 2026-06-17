@@ -27,6 +27,33 @@ const BIMESTRES = [
   "Avaliação Final", "Recuperação",
 ];
 
+const DIFICULDADES = [
+  {
+    value: "facil",
+    label: "Fácil",
+    emoji: "🟢",
+    description: "Fixação, revisão e recuperação. Linguagem simples, questões diretas.",
+    color: "border-green-400 bg-green-50 dark:bg-green-950/20 text-green-800 dark:text-green-300",
+    selectedColor: "border-green-500 bg-green-100 dark:bg-green-900/40 ring-2 ring-green-400",
+  },
+  {
+    value: "medio",
+    label: "Médio",
+    emoji: "🟡",
+    description: "Padrão escolar tradicional. Exige compreensão e aplicação do conteúdo.",
+    color: "border-yellow-400 bg-yellow-50 dark:bg-yellow-950/20 text-yellow-800 dark:text-yellow-300",
+    selectedColor: "border-yellow-500 bg-yellow-100 dark:bg-yellow-900/40 ring-2 ring-yellow-400",
+  },
+  {
+    value: "dificil",
+    label: "Difícil",
+    emoji: "🔴",
+    description: "Padrão vestibular (ENEM, FUVEST, UNICAMP, VUNESP). Alta interpretação e raciocínio crítico.",
+    color: "border-red-400 bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-300",
+    selectedColor: "border-red-500 bg-red-100 dark:bg-red-900/40 ring-2 ring-red-400",
+  },
+];
+
 const schema = z.object({
   nomeEscola: z.string().optional(),
   nomeProfessor: z.string().optional(),
@@ -35,6 +62,7 @@ const schema = z.object({
   turma: z.string().optional(),
   bimestre: z.string().optional(),
   conteudo: z.string().min(5, "Descreva o conteúdo da prova"),
+  dificuldade: z.enum(["facil", "medio", "dificil"]),
   questoesAlternativas: z.number().min(0).max(20),
   questoesDiscursivas: z.number().min(0).max(8),
   instrucoes: z.string().optional(),
@@ -59,6 +87,7 @@ export default function CriarProva() {
       anoSerie: prefill?.anoSerie ?? "",
       turma: prefill?.turma ?? "",
       conteudo: prefill?.conteudo ?? "",
+      dificuldade: "medio",
       questoesAlternativas: 10,
       questoesDiscursivas: 2,
       valorTotal: 10,
@@ -67,6 +96,7 @@ export default function CriarProva() {
 
   const questoesAlternativas = watch("questoesAlternativas");
   const questoesDiscursivas = watch("questoesDiscursivas");
+  const dificuldade = watch("dificuldade");
 
   const { mutate: generateExam, isPending } = useGenerateExam({
     mutation: {
@@ -96,7 +126,7 @@ export default function CriarProva() {
   });
 
   const onSubmit = (data: FormData) => {
-    generateExam({ data });
+    generateExam({ data: { ...data, dificuldade: data.dificuldade } });
   };
 
   const totalQuestoes = questoesAlternativas + questoesDiscursivas;
@@ -212,6 +242,32 @@ export default function CriarProva() {
 
           <Card>
             <CardHeader>
+              <CardTitle className="text-base">Nível de Dificuldade *</CardTitle>
+              <CardDescription>Selecione o nível de dificuldade das questões</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {DIFICULDADES.map((d) => (
+                  <button
+                    key={d.value}
+                    type="button"
+                    onClick={() => setValue("dificuldade", d.value as "facil" | "medio" | "dificil")}
+                    className={`p-4 rounded-xl border-2 text-left transition-all duration-200 ${
+                      dificuldade === d.value ? d.selectedColor : `${d.color} hover:opacity-80`
+                    }`}
+                  >
+                    <div className="text-2xl mb-1">{d.emoji}</div>
+                    <div className="font-semibold text-sm mb-1">{d.label}</div>
+                    <div className="text-xs opacity-80 leading-snug">{d.description}</div>
+                  </button>
+                ))}
+              </div>
+              {errors.dificuldade && <p className="text-xs text-destructive mt-2">{errors.dificuldade.message}</p>}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle className="text-base">Estrutura da prova</CardTitle>
               <CardDescription>Defina quantas questões de cada tipo</CardDescription>
             </CardHeader>
@@ -262,6 +318,7 @@ export default function CriarProva() {
                     Total: <strong>{totalQuestoes} questão{totalQuestoes !== 1 ? "ões" : ""}</strong>
                     {questoesAlternativas > 0 && ` · ${questoesAlternativas} alternativa${questoesAlternativas !== 1 ? "s" : ""}`}
                     {questoesDiscursivas > 0 && ` · ${questoesDiscursivas} discursiva${questoesDiscursivas !== 1 ? "s" : ""}`}
+                    {dificuldade && ` · ${dificuldade === "facil" ? "🟢 Fácil" : dificuldade === "medio" ? "🟡 Médio" : "🔴 Difícil"}`}
                   </p>
                 </div>
               )}

@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Users, Crown, Shield, BarChart3, Search, CheckCircle, XCircle, RotateCcw, Ban, Unlock, Plus, Minus, ChevronDown, ChevronUp, Clock } from "lucide-react";
+import {
+  Users, Crown, Shield, BarChart3, Search, XCircle, RotateCcw, Ban,
+  Unlock, Plus, Minus, ChevronDown, ChevronUp, Clock, FileQuestion,
+  Sparkles, ClipboardList, BookMarked, FileText, Wand2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "sonner";
+
+interface GenerationsByType {
+  [key: string]: number;
+}
 
 interface DashboardStats {
   totalUsers: number;
@@ -18,6 +26,7 @@ interface DashboardStats {
   totalGenerations: number;
   estimatedTokens: number;
   topUsers: Array<{ userId: number; email: string; name: string | null; generations: number }>;
+  generationsByType?: GenerationsByType;
 }
 
 interface AdminUser {
@@ -49,6 +58,16 @@ const ACTION_LABELS: Record<string, string> = {
   restore_free: "Gerações restauradas",
   block_user: "Usuário bloqueado",
   unblock_user: "Usuário desbloqueado",
+};
+
+const TYPE_LABELS: Record<string, { label: string; icon: React.ElementType; color: string }> = {
+  exam_generate: { label: "Provas geradas", icon: FileQuestion, color: "text-blue-600" },
+  planning_generate: { label: "Planejamentos gerados", icon: Sparkles, color: "text-purple-600" },
+  activities_generate: { label: "Atividades geradas", icon: ClipboardList, color: "text-green-600" },
+  sequence_generate: { label: "Sequências didáticas", icon: BookMarked, color: "text-indigo-600" },
+  report_generate: { label: "Relatórios gerados", icon: FileText, color: "text-orange-600" },
+  adapt_generate: { label: "Adaptações de conteúdo", icon: Wand2, color: "text-pink-600" },
+  planning_improve: { label: "Sugestões de melhoria", icon: Sparkles, color: "text-amber-600" },
 };
 
 export default function Admin() {
@@ -116,13 +135,17 @@ export default function Admin() {
     );
   }
 
+  const totalByType = stats?.generationsByType
+    ? Object.values(stats.generationsByType).reduce((a, b) => a + b, 0)
+    : 0;
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
           <Shield className="h-6 w-6 text-primary" /> Painel Administrativo
         </h1>
-        <p className="text-muted-foreground text-sm mt-1">Gerenciamento de usuários e acessos</p>
+        <p className="text-muted-foreground text-sm mt-1">Gerenciamento de usuários e métricas da plataforma</p>
       </div>
 
       <Tabs defaultValue="dashboard">
@@ -139,7 +162,7 @@ export default function Admin() {
                 {[
                   { label: "Total de usuários", value: stats.totalUsers, icon: Users, color: "text-blue-600" },
                   { label: "Premium", value: stats.premiumUsers, icon: Crown, color: "text-amber-600" },
-                  { label: "Período gratuito", value: stats.freeUsers, icon: BarChart3, color: "text-green-600" },
+                  { label: "Gratuitos ativos", value: stats.freeUsers, icon: BarChart3, color: "text-green-600" },
                   { label: "Bloqueados", value: stats.blockedUsers, icon: Ban, color: "text-red-600" },
                 ].map((s) => (
                   <Card key={s.label}>
@@ -156,40 +179,73 @@ export default function Admin() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Card>
-                  <CardHeader><CardTitle className="text-base">Uso da IA</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">Total de gerações</span>
-                      <span className="font-semibold">{stats.totalGenerations}</span>
+                  <CardHeader><CardTitle className="text-base">Uso da IA por funcionalidade</CardTitle></CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between items-center pb-2 border-b">
+                      <span className="text-sm font-medium text-muted-foreground">Total de gerações</span>
+                      <span className="font-bold text-lg">{stats.totalGenerations}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">Tokens estimados</span>
-                      <span className="font-semibold">{stats.estimatedTokens.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">Custo estimado (~$0.003/1k)</span>
-                      <span className="font-semibold text-green-600">
-                        ${((stats.estimatedTokens / 1000) * 0.003).toFixed(4)}
-                      </span>
-                    </div>
+                    {Object.entries(TYPE_LABELS).map(([key, info]) => {
+                      const count = stats.generationsByType?.[key] ?? 0;
+                      const pct = totalByType > 0 ? Math.round((count / totalByType) * 100) : 0;
+                      const Icon = info.icon;
+                      return (
+                        <div key={key}>
+                          <div className="flex justify-between items-center mb-1">
+                            <div className="flex items-center gap-1.5">
+                              <Icon className={`h-3.5 w-3.5 ${info.color}`} />
+                              <span className="text-sm text-muted-foreground">{info.label}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">{pct}%</span>
+                              <span className="font-semibold text-sm">{count}</span>
+                            </div>
+                          </div>
+                          <div className="w-full bg-muted rounded-full h-1.5">
+                            <div
+                              className="bg-primary h-1.5 rounded-full transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardHeader><CardTitle className="text-base">Mais ativos</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    {stats.topUsers.length === 0 && <p className="text-sm text-muted-foreground">Nenhum uso ainda</p>}
-                    {stats.topUsers.map((u, i) => (
-                      <div key={u.userId} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground w-4">{i + 1}.</span>
-                          <span className="text-sm truncate max-w-[160px]">{u.name || u.email}</span>
-                        </div>
-                        <Badge variant="secondary">{u.generations} gerações</Badge>
+                <div className="space-y-4">
+                  <Card>
+                    <CardHeader><CardTitle className="text-base">Custo estimado</CardTitle></CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-sm text-muted-foreground">Tokens estimados</span>
+                        <span className="font-semibold">{stats.estimatedTokens.toLocaleString()}</span>
                       </div>
-                    ))}
-                  </CardContent>
-                </Card>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-muted-foreground">Custo estimado (~$0.003/1k)</span>
+                        <span className="font-semibold text-green-600">
+                          ${((stats.estimatedTokens / 1000) * 0.003).toFixed(4)}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader><CardTitle className="text-base">Mais ativos</CardTitle></CardHeader>
+                    <CardContent className="space-y-2">
+                      {stats.topUsers.length === 0 && <p className="text-sm text-muted-foreground">Nenhum uso ainda</p>}
+                      {stats.topUsers.map((u, i) => (
+                        <div key={u.userId} className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-4">{i + 1}.</span>
+                            <span className="text-sm truncate max-w-[160px]">{u.name || u.email}</span>
+                          </div>
+                          <Badge variant="secondary">{u.generations} gerações</Badge>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                </div>
               </div>
             </div>
           )}
@@ -308,7 +364,7 @@ export default function Admin() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Por: {log.adminEmail} • Usuário ID: {log.targetUserId}
+                    Por: {log.adminEmail} · Usuário ID: {log.targetUserId}
                   </p>
                 </div>
                 <span className="text-xs text-muted-foreground whitespace-nowrap ml-4">

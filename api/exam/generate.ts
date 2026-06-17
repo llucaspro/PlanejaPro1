@@ -12,20 +12,14 @@ function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
-/** Remove markdown fences, JS comments, trailing commas — makes Gemini JSON parseable */
 function cleanJson(raw: string): string {
   let s = raw.trim();
-  // strip ```json ... ``` or ``` ... ```
   s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  // find first { and last }
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
   if (start !== -1 && end !== -1) s = s.slice(start, end + 1);
-  // remove single-line // comments (not inside strings)
   s = s.replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g, (m, str) => str ?? "");
-  // remove multi-line /* */ comments
   s = s.replace(/("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\//g, (m, str) => str ?? "");
-  // remove trailing commas before ] or }
   s = s.replace(/,\s*([}\]])/g, "$1");
   return s;
 }
@@ -66,6 +60,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const valorAlt = nAlt > 0 ? parseFloat((valorTotal * (nDisc > 0 ? 0.6 : 1) / nAlt).toFixed(2)) : 0;
   const valorDisc = nDisc > 0 ? parseFloat((valorTotal * (nAlt > 0 ? 0.4 : 1) / nDisc).toFixed(2)) : 0;
 
+  const dificuldade: string = body.dificuldade || "medio";
+
+  const dificuldadeInstrucoes: Record<string, string> = {
+    facil: `Dificuldade selecionada pelo professor: Fácil.
+Crie questões voltadas para fixação, revisão e recuperação. Use linguagem simples, baixo nível de abstração, questões diretas e com menor necessidade de interpretação. Evite contextos complexos.`,
+    medio: `Dificuldade selecionada pelo professor: Médio.
+Crie questões semelhantes às utilizadas em avaliações escolares tradicionais. Exija compreensão do conteúdo, aplicação básica do conhecimento e interpretação moderada.`,
+    dificil: `Dificuldade selecionada pelo professor: Difícil. Utilize padrão semelhante ao encontrado em vestibulares e exames seletivos (ETEC, ENEM, FUVEST, UNESP, UNICAMP, VUNESP, IFSP).
+As questões DEVEM exigir: alta interpretação, raciocínio crítico, contextualização, aplicação de conceitos em situações-problema. As questões difíceis NÃO devem ser apenas perguntas decoradas — devem exigir pensamento.`,
+  };
+
+  const instrucaoDificuldade = dificuldadeInstrucoes[dificuldade] || dificuldadeInstrucoes["medio"];
+
   const prompt = `Você é um professor especialista. Crie uma prova escolar em JSON puro (sem markdown, sem comentários).
 
 Dados:
@@ -76,6 +83,8 @@ Dados:
 - Instruções especiais: ${body.instrucoes ?? "nenhuma"}
 - Questões de múltipla escolha: ${nAlt} (${valorAlt} pts cada)
 - Questões discursivas: ${nDisc} (${valorDisc} pts cada)
+
+${instrucaoDificuldade}
 
 Responda SOMENTE com JSON válido neste formato exato (sem texto antes ou depois):
 {"titulo":"...","instrucoes":"...","questoesAlternativas":[{"numero":1,"enunciado":"...","alternativas":{"a":"...","b":"...","c":"...","d":"...","e":"..."},"gabarito":"a","valor":${valorAlt}}],"questoesDiscursivas":[{"numero":${nAlt + 1},"enunciado":"...","linhasResposta":6,"valor":${valorDisc},"criterios":"..."}]}
@@ -95,7 +104,7 @@ IMPORTANTE: gere exatamente ${nAlt} questões de múltipla escolha e ${nDisc} di
     let exam: Record<string, unknown>;
     try {
       exam = JSON.parse(cleanJson(raw));
-    } catch (parseErr) {
+    } catch {
       return res.status(500).json({ error: "IA retornou JSON inválido. Tente novamente." });
     }
 
@@ -116,6 +125,7 @@ IMPORTANTE: gere exatamente ${nAlt} questões de múltipla escolha e ${nDisc} di
 
     return res.status(200).json({
       ...exam,
+      dificuldade,
       _meta: {
         freeGenerationsRemaining: user.isPremium ? null : user.freeGenerationsRemaining - 1,
         isPremium: user.isPremium,
