@@ -1,12 +1,10 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { GoogleGenAI } from "@google/genai";
 import { eq } from "drizzle-orm";
 import { getDb, usersTable, aiUsageTable } from "../_lib/db";
 import { verifyToken, extractBearerToken } from "../_lib/auth";
+import { generateWithFallback, isOverloadedError2 } from "../_lib/gemini";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-
-const MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
+const MAX_FIELD = 800;
 
 function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -23,31 +21,8 @@ function parseJson(raw: string): Record<string, unknown> | null {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-function isOverloadedError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
-  return msg.includes("503") || msg.includes("overloaded") || msg.includes("unavailable") || msg.includes("high demand");
-}
-
-async function generateWithFallback(
-  prompt: string,
-  config: object,
-): Promise<string> {
-  let lastErr: unknown;
-  for (const model of MODELS) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        config,
-      });
-      return response.text ?? "";
-    } catch (err) {
-      lastErr = err;
-      if (!isOverloadedError(err)) throw err;
-    }
-  }
-  throw lastErr;
+function s(v: unknown, max = MAX_FIELD): string {
+  return typeof v === "string" ? v.trim().slice(0, max) : "";
 }
 
 async function handleActivities(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: object }> {
@@ -55,8 +30,8 @@ async function handleActivities(body: Record<string, unknown>): Promise<{ prompt
     throw new Error("Campos obrigatórios: disciplina, anoSerie, tema");
 
   const quantidade = Math.min(Math.max(Number(body.quantidade ?? 5), 1), 20);
-  const dificuldade = (body.dificuldade as string) || "medio";
-  const tipo = (body.tipo as string) || "exercicios";
+  const dificuldade = ["facil", "medio", "dificil"].includes(s(body.dificuldade)) ? s(body.dificuldade) : "medio";
+  const tipo = ["exercicios", "revisao", "recuperacao", "tarefa", "grupo"].includes(s(body.tipo)) ? s(body.tipo) : "exercicios";
 
   const tipoMap: Record<string, string> = {
     exercicios: "exercícios de fixação",
@@ -71,12 +46,12 @@ async function handleActivities(body: Record<string, unknown>): Promise<{ prompt
     dificil: "Difícil — padrão vestibular (ETEC, ENEM, FUVEST, UNESP, UNICAMP). Alta interpretação, raciocínio crítico.",
   };
 
-  const prompt = `Você é um professor especialista em pedagogia brasileira. Crie ${quantidade} ${tipoMap[tipo] || "exercícios"} para:
-- Disciplina: ${body.disciplina}
-- Ano/Série: ${body.anoSerie}
-- Tema: ${body.tema}
+  const prompt = `Você é um professor especialista em pedagogia brasileira. Crie ${quantidade} ${tipoMap[tipo]} para:
+- Disciplina: ${s(body.disciplina, 100)}
+- Ano/Série: ${s(body.anoSerie, 50)}
+- Tema: ${s(body.tema, 400)}
 - Tipo: ${tipoMap[tipo]}
-- Dificuldade: ${dificuldadeMap[dificuldade] || dificuldadeMap["medio"]}
+- Dificuldade: ${dificuldadeMap[dificuldade]}
 
 Retorne APENAS JSON válido (sem markdown):
 {
@@ -110,20 +85,22 @@ async function handleAdapt(body: Record<string, unknown>): Promise<{ prompt: str
     revisao_rapida: "Transforme em um guia de revisão rápida. Organize em checklist ou tópicos numerados.",
   };
 
+  const tipoKey = s(body.tipo, 30);
+
   const prompt = `Você é um especialista em pedagogia brasileira e adaptação de conteúdo educacional.
 
-Tarefa: ${tipoMap[(body.tipo as string)] || tipoMap["simplificar"]}
+Tarefa: ${tipoMap[tipoKey] || tipoMap["simplificar"]}
 
 Conteúdo original:
 ---
-${body.conteudo}
+${s(body.conteudo, 2000)}
 ---
-${body.serieAlvo ? `\nSérie alvo: ${body.serieAlvo}` : ""}
+${body.serieAlvo ? `\nSérie alvo: ${s(body.serieAlvo, 50)}` : ""}
 
 Retorne APENAS JSON válido (sem markdown):
 {
   "titulo": "Título do conteúdo adaptado",
-  "tipo": "${body.tipo}",
+  "tipo": "${tipoKey}",
   "conteudoAdaptado": "Texto completo adaptado",
   "observacoesPedagogicas": "Dicas para o professor",
   "diferencas": ["Diferença 1", "Diferença 2"]
@@ -136,14 +113,15 @@ async function handleSequences(body: Record<string, unknown>): Promise<{ prompt:
     throw new Error("Campos obrigatórios: disciplina, anoSerie, tema");
 
   const numAulas = Math.min(Math.max(Number(body.numAulas ?? 4), 1), 12);
+  const duracaoAula = Math.min(Math.max(Number(body.duracaoAula ?? 50), 20), 180);
 
   const prompt = `Você é um especialista em pedagogia brasileira e BNCC. Crie uma sequência didática para:
-- Disciplina: ${body.disciplina}
-- Ano/Série: ${body.anoSerie}
-- Tema: ${body.tema}
+- Disciplina: ${s(body.disciplina, 100)}
+- Ano/Série: ${s(body.anoSerie, 50)}
+- Tema: ${s(body.tema, 400)}
 - Número de aulas: ${numAulas}
-- Duração de cada aula: ${body.duracaoAula || 50} minutos
-- Objetivos: ${body.objetivos || "Desenvolver os conteúdos de forma significativa"}
+- Duração de cada aula: ${duracaoAula} minutos
+- Objetivos: ${s(body.objetivos, 400) || "Desenvolver os conteúdos de forma significativa"}
 
 Retorne APENAS JSON válido (sem markdown):
 {
@@ -178,6 +156,7 @@ async function handleReports(body: Record<string, unknown>): Promise<{ prompt: s
   if (!body?.tipo || !body?.informacoes)
     throw new Error("Campos obrigatórios: tipo, informacoes");
 
+  const tipoKey = ["parecer", "individual", "turma", "observacoes"].includes(s(body.tipo, 20)) ? s(body.tipo, 20) : "parecer";
   const tipoPrompts: Record<string, string> = {
     parecer: "Crie um parecer descritivo individual profissional. Tom formal, objetivo e positivo.",
     individual: "Crie um relatório individual completo: desempenho acadêmico, desenvolvimento social, participação.",
@@ -187,20 +166,20 @@ async function handleReports(body: Record<string, unknown>): Promise<{ prompt: s
 
   const prompt = `Você é um especialista em redação de documentos pedagógicos para a educação básica brasileira.
 
-${tipoPrompts[(body.tipo as string)] || tipoPrompts["parecer"]}
+${tipoPrompts[tipoKey]}
 
 Informações fornecidas pelo professor:
 ---
-${body.informacoes}
+${s(body.informacoes, 1500)}
 ---
-${body.nomeAluno ? `\nAluno/a: ${body.nomeAluno}` : ""}
-${body.anoSerie ? `Ano/Série: ${body.anoSerie}` : ""}
-${body.disciplina ? `Disciplina: ${body.disciplina}` : ""}
-${body.periodo ? `Período: ${body.periodo}` : ""}
+${body.nomeAluno ? `\nAluno/a: ${s(body.nomeAluno, 100)}` : ""}
+${body.anoSerie ? `Ano/Série: ${s(body.anoSerie, 50)}` : ""}
+${body.disciplina ? `Disciplina: ${s(body.disciplina, 100)}` : ""}
+${body.periodo ? `Período: ${s(body.periodo, 50)}` : ""}
 
 Retorne APENAS JSON válido (sem markdown):
 {
-  "tipo": "${body.tipo}",
+  "tipo": "${tipoKey}",
   "titulo": "Título do documento",
   "textoCompleto": "Texto completo do relatório/parecer, bem redigido, com parágrafos estruturados",
   "pontosPrincipais": ["Ponto 1", "Ponto 2", "Ponto 3"],
@@ -222,7 +201,8 @@ async function handleImprove(body: Record<string, unknown>): Promise<{ prompt: s
     colaborativa: "aprendizagem colaborativa e construção coletiva do conhecimento",
   };
 
-  const foco = body.foco ? (focusMap[(body.foco as string)] || "melhorias pedagógicas gerais") : "melhorias pedagógicas gerais";
+  const focoKey = s(body.foco, 30);
+  const foco = focusMap[focoKey] || "melhorias pedagógicas gerais";
   const planejamentoResumido = typeof body.planejamento === "string"
     ? body.planejamento.slice(0, 2000)
     : JSON.stringify(body.planejamento).slice(0, 2000);
@@ -238,7 +218,7 @@ ${planejamentoResumido}
 
 Retorne APENAS JSON válido (sem markdown):
 {
-  "foco": "${body.foco || "geral"}",
+  "foco": "${focoKey || "geral"}",
   "resumoMelhorias": "Resumo do que foi sugerido e por que melhora a aula",
   "sugestoes": [
     {
@@ -279,7 +259,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const body = req.body as Record<string, unknown>;
-  const type = body?.type as string;
+  const type = s(body?.type, 20);
 
   if (!type) return res.status(400).json({ error: "Campo obrigatório: type (activities|adapt|sequences|reports|improve)" });
 
@@ -291,7 +271,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case "sequences": promptData = await handleSequences(body); break;
       case "reports": promptData = await handleReports(body); break;
       case "improve": promptData = await handleImprove(body); break;
-      default: return res.status(400).json({ error: `Tipo inválido: ${type}. Use: activities, adapt, sequences, reports, improve` });
+      default: return res.status(400).json({ error: `Tipo inválido: ${type}` });
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro de validação";
@@ -321,11 +301,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
   } catch (err) {
-    const isOverloaded = isOverloadedError(err);
+    const isOverloaded = isOverloadedError2(err);
     const status = isOverloaded ? 503 : 500;
     const message = isOverloaded
       ? "O serviço de IA está com alta demanda. Aguarde alguns segundos e tente novamente."
-      : err instanceof Error ? err.message : "Erro desconhecido";
+      : "Falha ao processar. Tente novamente.";
     return res.status(status).json({ error: message });
   }
 }

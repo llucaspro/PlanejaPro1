@@ -3,6 +3,8 @@ import { ilike, or, desc } from "drizzle-orm";
 import { getDb, usersTable } from "../_lib/db";
 import { verifyToken, extractBearerToken, isAdminEmail } from "../_lib/auth";
 
+const PAGE_SIZE = 100;
+
 function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -22,7 +24,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!isAdminEmail(payload.email)) return res.status(403).json({ error: "Acesso negado" });
 
     const db = getDb();
-    const search = req.query.search as string | undefined;
+    const rawSearch = req.query.search;
+    const search = typeof rawSearch === "string" ? rawSearch.trim().slice(0, 100) : undefined;
 
     const users = search
       ? await db.select().from(usersTable).where(
@@ -30,8 +33,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ilike(usersTable.email, `%${search}%`),
             ilike(usersTable.name, `%${search}%`)
           )
-        ).orderBy(desc(usersTable.createdAt))
-      : await db.select().from(usersTable).orderBy(desc(usersTable.createdAt));
+        ).orderBy(desc(usersTable.createdAt)).limit(PAGE_SIZE)
+      : await db.select().from(usersTable).orderBy(desc(usersTable.createdAt)).limit(PAGE_SIZE);
 
     return res.status(200).json(users.map((u) => ({
       id: u.id,

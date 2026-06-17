@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import type { ReactNode } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -45,7 +45,7 @@ async function syncWithBackend(idToken: string): Promise<{ token: string; user: 
     body: JSON.stringify({ idToken }),
   });
   if (!res.ok) {
-    let msg = `Erro ${res.status} no servidor`;
+    let msg = "Erro ao conectar com servidor";
     try {
       const err = await res.json() as { error?: string };
       if (err?.error) msg = err.error;
@@ -60,6 +60,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const logoutRef = useRef<() => Promise<void>>();
+
+  const logout = useCallback(async () => {
+    await signOut(auth).catch(() => {});
+    clearToken();
+    setUser(null);
+    setToken(null);
+  }, []);
+
+  // Keep logout accessible via ref for use in refreshUser without circular deps
+  useEffect(() => {
+    logoutRef.current = logout;
+  }, [logout]);
 
   const refreshUser = useCallback(async () => {
     const currentToken = getStoredToken();
@@ -68,7 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/auth/me", {
         headers: { Authorization: `Bearer ${currentToken}` },
       });
-      if (!res.ok) { clearToken(); setToken(null); setUser(null); return; }
+      if (res.status === 401) {
+        clearToken();
+        setToken(null);
+        setUser(null);
+        toast.error("Sessão expirada. Faça login novamente.");
+        await logoutRef.current?.();
+        return;
+      }
+      if (!res.ok) { return; }
       const data = await res.json() as AppUser;
       setUser((prev) => prev ? { ...prev, ...data } : data);
     } catch {}
@@ -86,20 +107,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         setSyncError(null);
-        const idToken = await firebaseUser.getIdToken();
+        const idToken = await firebaseUser.getIdToken(true);
         const { token: appToken, user: appUser } = await syncWithBackend(idToken);
         storeToken(appToken);
         setToken(appToken);
         setUser({ ...appUser, firebaseUid: firebaseUser.uid });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Erro ao conectar com servidor";
-        console.error("Sync error:", msg);
         setSyncError(msg);
-        toast.error("Falha ao entrar na conta", {
-          description: msg,
-          duration: 8000,
-        });
-        // Sign out of Firebase too so user can retry
+        toast.error("Falha ao entrar na conta", { description: msg, duration: 8000 });
         await signOut(auth).catch(() => {});
         clearToken();
         setUser(null);
@@ -111,12 +127,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, []);
 
-  const logout = async () => {
-    await signOut(auth);
-    clearToken();
-    setUser(null);
-    setToken(null);
-  };
+  // Refresh user data periodically to keep premium/freeGenerations in sync (every 5 min)
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(() => { refreshUser(); }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [token, refreshUser]);
 
   return (
     <AuthContext.Provider value={{ user, token, loading, syncError, logout, refreshUser }}>

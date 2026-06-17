@@ -1,10 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { GoogleGenAI } from "@google/genai";
 import { eq } from "drizzle-orm";
 import { getDb, usersTable, aiUsageTable } from "../_lib/db";
 import { verifyToken, extractBearerToken } from "../_lib/auth";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+import { generateWithFallback, isOverloadedError2 } from "../_lib/gemini";
 
 function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -22,6 +20,11 @@ function cleanJson(raw: string): string {
   s = s.replace(/("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\//g, (m, str) => str ?? "");
   s = s.replace(/,\s*([}\]])/g, "$1");
   return s;
+}
+
+function sanitize(value: unknown, maxLen: number): string {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, maxLen);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -52,15 +55,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "Campos obrigatórios: disciplina, conteudo, anoSerie" });
   }
 
+  const disciplina = sanitize(body.disciplina, 100);
+  const conteudo = sanitize(body.conteudo, 800);
+  const anoSerie = sanitize(body.anoSerie, 50);
+  const turma = sanitize(body.turma, 50);
+  const instrucoes = sanitize(body.instrucoes, 400);
+
   const nAlt = Math.min(Math.max(Number(body.questoesAlternativas ?? 10), 0), 20);
   const nDisc = Math.min(Math.max(Number(body.questoesDiscursivas ?? 2), 0), 8);
   if (nAlt + nDisc === 0) return res.status(400).json({ error: "A prova deve ter ao menos uma questão." });
 
-  const valorTotal = parseFloat(body.valorTotal ?? "10") || 10;
+  const valorTotal = Math.min(Math.max(parseFloat(body.valorTotal ?? "10") || 10, 1), 100);
   const valorAlt = nAlt > 0 ? parseFloat((valorTotal * (nDisc > 0 ? 0.6 : 1) / nAlt).toFixed(2)) : 0;
   const valorDisc = nDisc > 0 ? parseFloat((valorTotal * (nAlt > 0 ? 0.4 : 1) / nDisc).toFixed(2)) : 0;
 
-  const dificuldade: string = body.dificuldade || "medio";
+  const dificuldade: string = ["facil", "medio", "dificil"].includes(body.dificuldade) ? body.dificuldade : "medio";
 
   const dificuldadeInstrucoes: Record<string, string> = {
     facil: `Dificuldade selecionada pelo professor: Fácil.
@@ -71,16 +80,16 @@ Crie questões semelhantes às utilizadas em avaliações escolares tradicionais
 As questões DEVEM exigir: alta interpretação, raciocínio crítico, contextualização, aplicação de conceitos em situações-problema. As questões difíceis NÃO devem ser apenas perguntas decoradas — devem exigir pensamento.`,
   };
 
-  const instrucaoDificuldade = dificuldadeInstrucoes[dificuldade] || dificuldadeInstrucoes["medio"];
+  const instrucaoDificuldade = dificuldadeInstrucoes[dificuldade];
 
   const prompt = `Você é um professor especialista. Crie uma prova escolar em JSON puro (sem markdown, sem comentários).
 
 Dados:
-- Disciplina: ${body.disciplina}
-- Ano/Série: ${body.anoSerie}
-- Turma: ${body.turma ?? "não especificada"}
-- Conteúdo: ${body.conteudo}
-- Instruções especiais: ${body.instrucoes ?? "nenhuma"}
+- Disciplina: ${disciplina}
+- Ano/Série: ${anoSerie}
+- Turma: ${turma || "não especificada"}
+- Conteúdo: ${conteudo}
+- Instruções especiais: ${instrucoes || "nenhuma"}
 - Questões de múltipla escolha: ${nAlt} (${valorAlt} pts cada)
 - Questões discursivas: ${nDisc} (${valorDisc} pts cada)
 
@@ -92,25 +101,20 @@ Responda SOMENTE com JSON válido neste formato exato (sem texto antes ou depois
 IMPORTANTE: gere exatamente ${nAlt} questões de múltipla escolha e ${nDisc} discursivas. Arrays vazios se o número for 0. Apenas JSON puro.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { maxOutputTokens: 8192, temperature: 0.6 },
-    });
+    const raw = await generateWithFallback(prompt, { maxOutputTokens: 8192, temperature: 0.6 });
 
-    const raw = response.text ?? "";
     if (!raw.trim()) return res.status(500).json({ error: "IA não retornou conteúdo" });
 
     let exam: Record<string, unknown>;
     try {
-      exam = JSON.parse(cleanJson(raw));
+      exam = JSON.parse(cleanJson(raw)) as Record<string, unknown>;
     } catch {
       return res.status(500).json({ error: "IA retornou JSON inválido. Tente novamente." });
     }
 
     if (!Array.isArray(exam.questoesAlternativas)) exam.questoesAlternativas = [];
     if (!Array.isArray(exam.questoesDiscursivas)) exam.questoesDiscursivas = [];
-    if (typeof exam.titulo !== "string") exam.titulo = `Prova de ${body.disciplina}`;
+    if (typeof exam.titulo !== "string") exam.titulo = `Prova de ${disciplina}`;
     if (typeof exam.instrucoes !== "string") exam.instrucoes = "Leia atentamente cada questão antes de responder.";
 
     const estimatedTokens = Math.round((prompt.length + JSON.stringify(exam).length) / 4);
@@ -132,7 +136,11 @@ IMPORTANTE: gere exatamente ${nAlt} questões de múltipla escolha e ${nDisc} di
       },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro desconhecido";
-    return res.status(500).json({ error: "Falha ao gerar prova: " + msg });
+    const isOverloaded = isOverloadedError2(err);
+    const status = isOverloaded ? 503 : 500;
+    const message = isOverloaded
+      ? "O serviço de IA está com alta demanda. Aguarde alguns segundos e tente novamente."
+      : "Falha ao gerar prova. Tente novamente.";
+    return res.status(status).json({ error: message });
   }
 }

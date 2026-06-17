@@ -1,6 +1,12 @@
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "planejapro-secret-change-in-prod";
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
+
+if (!JWT_SECRET) {
+  console.error("[SECURITY] AVISO: JWT_SECRET não está definido. Configure a variável de ambiente JWT_SECRET no Vercel.");
+}
+
+const SECRET = JWT_SECRET || "planejapro-secret-change-in-prod";
 
 export interface JwtPayload {
   userId: number;
@@ -12,11 +18,11 @@ export interface JwtPayload {
 }
 
 export function signToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "2h" });
+  return jwt.sign(payload, SECRET, { expiresIn: "24h" });
 }
 
 export function verifyToken(token: string): JwtPayload {
-  return jwt.verify(token, JWT_SECRET) as JwtPayload;
+  return jwt.verify(token, SECRET) as JwtPayload;
 }
 
 export function getAdminEmails(): string[] {
@@ -31,6 +37,10 @@ export async function verifyFirebaseToken(idToken: string): Promise<{ uid: strin
   const apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY;
   if (!apiKey) throw new Error("FIREBASE_API_KEY não configurado");
 
+  if (!idToken || typeof idToken !== "string" || idToken.length > 4096) {
+    throw new Error("Token Firebase inválido");
+  }
+
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
     {
@@ -41,8 +51,7 @@ export async function verifyFirebaseToken(idToken: string): Promise<{ uid: strin
   );
 
   if (!res.ok) {
-    const err = await res.json() as { error?: { message?: string } };
-    throw new Error(err?.error?.message || "Token Firebase inválido");
+    throw new Error("Token Firebase inválido ou expirado");
   }
 
   const data = await res.json() as { users?: Array<{ localId: string; email: string; displayName?: string }> };
@@ -54,5 +63,7 @@ export async function verifyFirebaseToken(idToken: string): Promise<{ uid: strin
 
 export function extractBearerToken(authHeader: string | undefined): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
-  return authHeader.slice(7);
+  const token = authHeader.slice(7).trim();
+  if (!token || token.length > 2048) return null;
+  return token;
 }
