@@ -1,0 +1,278 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: PlanejaPro API - Copiloto inteligente para planejamento pedagógico
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: planning
+    description: Geração de planejamento pedagógico com IA
+  - name: assistant
+    description: Assistente pedagógico conversacional
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /planning/generate:
+    post:
+      operationId: generatePlanning
+      tags: [planning]
+      summary: Gera planejamento pedagógico completo com IA
+      description: Recebe dados do formulário e retorna planejamento completo gerado pela IA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanningInput"
+      responses:
+        "200":
+          description: Planejamento gerado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratedPlanning"
+        "400":
+          description: Dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Erro interno / falha na IA
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /assistant/chat:
+    post:
+      operationId: assistantChat
+      tags: [assistant]
+      summary: Envia mensagem ao assistente pedagógico
+      description: Chat contextual com especialista em didática e metodologias ativas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatInput"
+      responses:
+        "200":
+          description: Resposta do assistente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          description: Mensagem inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Erro interno / falha na IA
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    PlanningInput:
+      type: object
+      required:
+        - disciplina
+        - anoSerie
+        - quantidadeAulas
+        - duracaoAula
+        - conteudo
+      properties:
+        disciplina:
+          type: string
+          description: Disciplina (ex. Matemática, Português)
+        anoSerie:
+          type: string
+          description: Ano/Série (ex. 6º Ano, 2º EM)
+        turma:
+          type: string
+          description: Identificação da turma
+        quantidadeAulas:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: Número de aulas no planejamento
+        duracaoAula:
+          type: integer
+          minimum: 30
+          maximum: 240
+          description: Duração de cada aula em minutos
+        perfilTurma:
+          type: array
+          items:
+            type: string
+          description: Perfis da turma (participativa, agitada, etc)
+        objetivos:
+          type: string
+          description: Objetivos desejados pelo professor
+        conteudo:
+          type: string
+          description: Conteúdo a ser trabalhado
+        recursosDisponiveis:
+          type: array
+          items:
+            type: string
+          description: Recursos disponíveis (projetor, internet, etc)
+        observacoes:
+          type: string
+          description: Observações adicionais do professor
+
+    GeneratedPlanning:
+      type: object
+      required:
+        - tema
+        - objetivoGeral
+        - objetivosEspecificos
+        - competencias
+        - habilidades
+        - metodologia
+        - sequenciaDidatica
+        - atividadeInicial
+        - desenvolvimento
+        - atividadePratica
+        - encerramento
+        - avaliacao
+        - criteriosAvaliativos
+        - estrategiasInclusivas
+        - adaptacoesDificuldades
+        - recursosNecessarios
+        - tarefaCasa
+        - observacoesPedagogicas
+        - versaoResumida
+        - sugestoesExtras
+      properties:
+        tema:
+          type: string
+        objetivoGeral:
+          type: string
+        objetivosEspecificos:
+          type: array
+          items:
+            type: string
+        competencias:
+          type: array
+          items:
+            type: string
+        habilidades:
+          type: array
+          items:
+            type: string
+        metodologia:
+          type: string
+        sequenciaDidatica:
+          type: array
+          items:
+            type: string
+        atividadeInicial:
+          type: string
+        desenvolvimento:
+          type: string
+        atividadePratica:
+          type: string
+        encerramento:
+          type: string
+        avaliacao:
+          type: string
+        criteriosAvaliativos:
+          type: array
+          items:
+            type: string
+        estrategiasInclusivas:
+          type: string
+        adaptacoesDificuldades:
+          type: string
+        recursosNecessarios:
+          type: array
+          items:
+            type: string
+        tarefaCasa:
+          type: string
+        observacoesPedagogicas:
+          type: string
+        versaoResumida:
+          type: string
+        sugestoesExtras:
+          type: array
+          items:
+            type: string
+
+    ChatMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+
+    ChatInput:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Mensagem do professor ao assistente
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+          description: Histórico de mensagens anteriores
+        planningContext:
+          type: string
+          description: Contexto do planejamento atual (opcional)
+
+    ChatResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Resposta do assistente pedagógico

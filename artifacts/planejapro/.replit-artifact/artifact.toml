@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "PlanejaPro"
+version = "1.0.0"
+id = "artifacts/planejapro"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18973
+
+[services.development]
+run = "pnpm --filter @workspace/planejapro run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/planejapro", "run", "build" ]
+publicDir = "artifacts/planejapro/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18973"
+BASE_PATH = "/"
