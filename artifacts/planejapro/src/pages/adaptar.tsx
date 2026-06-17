@@ -96,10 +96,10 @@ export default function Adaptar() {
     setIsLoading(true);
     setResult(null);
     try {
-      const res = await fetch("/api/adapt/generate", {
+      const res = await fetch("/api/tools/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, type: "adapt" }),
       });
       const json = await res.json() as Result & { error?: string };
       if (!res.ok) throw new Error(json.error || "Erro ao adaptar conteúdo");

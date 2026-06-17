@@ -552,10 +552,11 @@ export default function Resultado() {
     setMelhoriaLoading(true);
     setMelhoriaResult(null);
     try {
-      const res = await fetch("/api/planning/improve", {
+      const res = await fetch("/api/tools/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
+          type: "improve",
           foco: melhoriaFoco,
           planejamento: JSON.stringify(planning).slice(0, 2000),
         }),

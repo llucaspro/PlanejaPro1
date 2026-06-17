@@ -80,10 +80,10 @@ export default function SequenciaDidatica() {
     setIsLoading(true);
     setResult(null);
     try {
-      const res = await fetch("/api/sequences/generate", {
+      const res = await fetch("/api/tools/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, type: "sequences" }),
       });
       const json = await res.json() as Result & { error?: string };
       if (!res.ok) throw new Error(json.error || "Erro ao gerar sequência");
