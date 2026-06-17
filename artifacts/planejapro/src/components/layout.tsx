@@ -202,19 +202,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-[100dvh] w-full bg-background">
       <aside className="hidden md:flex flex-col w-64 border-r bg-card px-4 py-6">
-        <div className="flex items-center gap-2 px-2 mb-6">
-          <BookOpen className="h-6 w-6 text-primary" />
-          <span className="text-xl font-bold font-serif text-foreground">PlanejaPro</span>
+        <div className="flex items-center justify-center px-2 mb-6">
+          <img src="/logo.png" alt="PlanejaPro" className="h-14 w-auto object-contain" />
         </div>
         <NavLinks />
       </aside>
 
       <div className="flex flex-col flex-1 min-w-0">
-        <header className="md:hidden flex items-center justify-between border-b bg-card px-4 py-3">
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-6 w-6 text-primary" />
-            <span className="text-lg font-bold font-serif">PlanejaPro</span>
-          </div>
+        <header className="md:hidden flex items-center justify-between border-b bg-card px-4 py-2">
+          <img src="/logo.png" alt="PlanejaPro" className="h-10 w-auto object-contain" />
           <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="md:hidden">
@@ -223,7 +219,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </SheetTrigger>
             <SheetContent side="left" className="w-64 p-4 flex flex-col">
               <div className="flex items-center justify-between mb-4">
-                <span className="text-xl font-bold font-serif">Menu</span>
+                <img src="/logo.png" alt="PlanejaPro" className="h-10 w-auto object-contain" />
                 <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(false)}>
                   <X className="h-5 w-5" />
                 </Button>
