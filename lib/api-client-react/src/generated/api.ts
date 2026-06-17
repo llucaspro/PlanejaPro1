@@ -23,6 +23,8 @@ import type {
   ChatInput,
   ChatResponse,
   ErrorResponse,
+  ExamInput,
+  GeneratedExam,
   GeneratedPlanning,
   HealthStatus,
   PlanningInput
@@ -66,7 +68,6 @@ export const healthCheck = async ( options?: RequestInit): Promise<HealthStatus>
 
 
 
-
 export const getHealthCheckQueryKey = () => {
     return [
     `/api/healthz`
@@ -84,7 +85,6 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 
 
     const queryFn: QueryFunction<Awaited<ReturnType<typeof healthCheck>>> = ({ signal }) => healthCheck({ signal, ...requestOptions });
-
 
 
 
@@ -111,11 +111,6 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
-
-
-
-
-
 
 
 export const getGeneratePlanningUrl = () => {
@@ -164,8 +159,6 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
           return  generatePlanning(data,requestOptions)
         }
-
-
 
 
 
@@ -240,8 +233,6 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-
-
   return  { mutationFn, ...mutationOptions }}
 
     export type AssistantChatMutationResult = NonNullable<Awaited<ReturnType<typeof assistantChat>>>
@@ -262,3 +253,58 @@ export const useAssistantChat = <TError = ErrorType<ErrorResponse>,
       return useMutation(getAssistantChatMutationOptions(options));
     }
 
+export const getGenerateExamUrl = () => {
+  return `/api/exam/generate`
+}
+
+/**
+ * Recebe parâmetros da prova e retorna questões geradas pela IA prontas para impressão
+ * @summary Gera prova completa com IA
+ */
+export const generateExam = async (examInput: ExamInput, options?: RequestInit): Promise<GeneratedExam> => {
+
+  return customFetch<GeneratedExam>(getGenerateExamUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(examInput)
+  }
+);}
+
+
+export const getGenerateExamMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateExam>>, TError,{data: BodyType<ExamInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateExam>>, TError,{data: BodyType<ExamInput>}, TContext> => {
+
+const mutationKey = ['generateExam'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateExam>>, {data: BodyType<ExamInput>}> = (props) => {
+          const {data} = props ?? {};
+          return  generateExam(data,requestOptions)
+        }
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateExamMutationResult = NonNullable<Awaited<ReturnType<typeof generateExam>>>
+    export type GenerateExamMutationBody = BodyType<ExamInput>
+    export type GenerateExamMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Gera prova completa com IA
+ */
+export const useGenerateExam = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateExam>>, TError,{data: BodyType<ExamInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateExam>>,
+        TError,
+        {data: BodyType<ExamInput>},
+        TContext
+      > => {
+      return useMutation(getGenerateExamMutationOptions(options));
+    }
