@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import type { ReactNode } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { toast } from "sonner";
 
 export interface AppUser {
   firebaseUid: string;
@@ -18,6 +19,7 @@ interface AuthContextValue {
   user: AppUser | null;
   token: string | null;
   loading: boolean;
+  syncError: string | null;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -36,15 +38,19 @@ function clearToken() {
   try { localStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
-async function syncWithBackend(idToken: string): Promise<{ token: string; user: AppUser & { firebaseUid?: string } }> {
+async function syncWithBackend(idToken: string): Promise<{ token: string; user: AppUser }> {
   const res = await fetch("/api/auth/sync", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ idToken }),
   });
   if (!res.ok) {
-    const err = await res.json() as { error?: string };
-    throw new Error(err?.error || "Erro ao sincronizar conta");
+    let msg = `Erro ${res.status} no servidor`;
+    try {
+      const err = await res.json() as { error?: string };
+      if (err?.error) msg = err.error;
+    } catch {}
+    throw new Error(msg);
   }
   return res.json() as Promise<{ token: string; user: AppUser }>;
 }
@@ -53,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const refreshUser = useCallback(async () => {
     const currentToken = getStoredToken();
@@ -78,13 +85,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       try {
+        setSyncError(null);
         const idToken = await firebaseUser.getIdToken();
         const { token: appToken, user: appUser } = await syncWithBackend(idToken);
         storeToken(appToken);
         setToken(appToken);
         setUser({ ...appUser, firebaseUid: firebaseUser.uid });
       } catch (err) {
-        console.error("Sync error:", err);
+        const msg = err instanceof Error ? err.message : "Erro ao conectar com servidor";
+        console.error("Sync error:", msg);
+        setSyncError(msg);
+        toast.error("Falha ao entrar na conta", {
+          description: msg,
+          duration: 8000,
+        });
+        // Sign out of Firebase too so user can retry
+        await signOut(auth).catch(() => {});
         clearToken();
         setUser(null);
         setToken(null);
@@ -103,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, token, loading, syncError, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

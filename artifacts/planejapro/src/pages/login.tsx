@@ -3,14 +3,16 @@ import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { BookOpen, Loader2, Mail, Lock } from "lucide-react";
+import { BookOpen, Loader2, Mail, Lock, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
 
 export default function Login() {
   const [, navigate] = useLocation();
+  const { syncError } = useAuth();
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [loading, setLoading] = useState(false);
@@ -93,8 +95,11 @@ export default function Login() {
                 </div>
               </div>
 
-              {erro && (
-                <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">{erro}</p>
+              {(erro || syncError) && (
+                <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">
+                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{erro || syncError}</span>
+                </div>
               )}
 
               <Button type="submit" className="w-full" disabled={loading}>
