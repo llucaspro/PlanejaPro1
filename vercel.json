@@ -1,18 +1,9 @@
 {
   "version": 2,
-  "buildCommand": "pnpm install && pnpm --filter @workspace/planejapro run build",
-  "outputDirectory": "artifacts/planejapro/dist/public",
   "installCommand": "pnpm install",
-  "framework": null,
-  "functions": {
-    "api/**/*.ts": {
-      "maxDuration": 30
-    }
-  },
+  "buildCommand": "pnpm --filter @workspace/planejapro run build && cp -r artifacts/planejapro/dist/public ./dist",
+  "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/planning/generate", "destination": "/api/planning/generate" },
-    { "source": "/api/assistant/chat", "destination": "/api/assistant/chat" },
-    { "source": "/api/healthz", "destination": "/api/healthz" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
