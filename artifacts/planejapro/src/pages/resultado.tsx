@@ -35,10 +35,30 @@ function Section({ title, children, defaultOpen = true }: { title: string; child
   );
 }
 
-function StringList({ items }: { items: string[] }) {
+function toDisplayString(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(toDisplayString).join("\n");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${k}: ${toDisplayString(v)}`)
+      .join(" | ");
+  }
+  return String(value);
+}
+
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(toDisplayString);
+  if (typeof value === "string") return value.split("\n").filter(Boolean);
+  return [toDisplayString(value)].filter(Boolean);
+}
+
+function StringList({ items }: { items: unknown[] }) {
+  const strs = toStringArray(items);
   return (
     <ul className="space-y-1.5">
-      {items.map((item, i) => (
+      {strs.map((item, i) => (
         <li key={i} className="flex gap-2 text-sm text-foreground">
           <span className="text-primary mt-0.5">•</span>
           <span>{item}</span>
@@ -48,8 +68,8 @@ function StringList({ items }: { items: string[] }) {
   );
 }
 
-function TextBlock({ text }: { text: string }) {
-  return <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{text}</p>;
+function TextBlock({ text }: { text: unknown }) {
+  return <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{toDisplayString(text)}</p>;
 }
 
 export default function Resultado() {
@@ -97,64 +117,64 @@ export default function Resultado() {
       "PLANEJAMENTO PEDAGÓGICO — PlanejaPro",
       "=".repeat(50),
       "",
-      `TEMA: ${planning.tema}`,
+      `TEMA: ${toDisplayString(planning.tema)}`,
       "",
       "OBJETIVO GERAL",
-      planning.objetivoGeral,
+      toDisplayString(planning.objetivoGeral),
       "",
       "OBJETIVOS ESPECÍFICOS",
-      ...planning.objetivosEspecificos.map(o => `• ${o}`),
+      ...toStringArray(planning.objetivosEspecificos).map(o => `• ${o}`),
       "",
       "COMPETÊNCIAS",
-      ...planning.competencias.map(c => `• ${c}`),
+      ...toStringArray(planning.competencias).map(c => `• ${c}`),
       "",
       "HABILIDADES",
-      ...planning.habilidades.map(h => `• ${h}`),
+      ...toStringArray(planning.habilidades).map(h => `• ${h}`),
       "",
       "METODOLOGIA",
-      planning.metodologia,
+      toDisplayString(planning.metodologia),
       "",
       "SEQUÊNCIA DIDÁTICA",
-      ...planning.sequenciaDidatica.map((s, i) => `${i + 1}. ${s}`),
+      ...toStringArray(planning.sequenciaDidatica).map((s, i) => `${i + 1}. ${s}`),
       "",
       "ATIVIDADE INICIAL",
-      planning.atividadeInicial,
+      toDisplayString(planning.atividadeInicial),
       "",
       "DESENVOLVIMENTO",
-      planning.desenvolvimento,
+      toDisplayString(planning.desenvolvimento),
       "",
       "ATIVIDADE PRÁTICA",
-      planning.atividadePratica,
+      toDisplayString(planning.atividadePratica),
       "",
       "ENCERRAMENTO",
-      planning.encerramento,
+      toDisplayString(planning.encerramento),
       "",
       "AVALIAÇÃO",
-      planning.avaliacao,
+      toDisplayString(planning.avaliacao),
       "",
       "CRITÉRIOS AVALIATIVOS",
-      ...planning.criteriosAvaliativos.map(c => `• ${c}`),
+      ...toStringArray(planning.criteriosAvaliativos).map(c => `• ${c}`),
       "",
       "ESTRATÉGIAS INCLUSIVAS",
-      planning.estrategiasInclusivas,
+      toDisplayString(planning.estrategiasInclusivas),
       "",
       "ADAPTAÇÕES PARA DIFICULDADES",
-      planning.adaptacoesDificuldades,
+      toDisplayString(planning.adaptacoesDificuldades),
       "",
       "RECURSOS NECESSÁRIOS",
-      ...planning.recursosNecessarios.map(r => `• ${r}`),
+      ...toStringArray(planning.recursosNecessarios).map(r => `• ${r}`),
       "",
       "TAREFA DE CASA",
-      planning.tarefaCasa,
+      toDisplayString(planning.tarefaCasa),
       "",
       "OBSERVAÇÕES PEDAGÓGICAS",
-      planning.observacoesPedagogicas,
+      toDisplayString(planning.observacoesPedagogicas),
       "",
       "VERSÃO RESUMIDA",
-      planning.versaoResumida,
+      toDisplayString(planning.versaoResumida),
       "",
       "SUGESTÕES EXTRAS",
-      ...planning.sugestoesExtras.map(s => `• ${s}`),
+      ...toStringArray(planning.sugestoesExtras).map(s => `• ${s}`),
       "",
       "-".repeat(50),
       "Gerado por PlanejaPro — Revise e adapte conforme sua realidade.",
@@ -172,7 +192,7 @@ export default function Resultado() {
 
   const handleCopyResumo = () => {
     if (!planning) return;
-    navigator.clipboard.writeText(planning.versaoResumida);
+    navigator.clipboard.writeText(toDisplayString(planning.versaoResumida));
     toast.success("Resumo copiado para a área de transferência!");
   };
 
@@ -201,7 +221,7 @@ export default function Resultado() {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold font-serif text-foreground leading-tight mb-2">
-              {planning.tema}
+              {toDisplayString(planning.tema)}
             </h1>
             {input && (
               <div className="flex flex-wrap gap-2">
@@ -265,7 +285,7 @@ export default function Resultado() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-foreground leading-relaxed">{planning.versaoResumida}</p>
+          <p className="text-sm text-foreground leading-relaxed">{toDisplayString(planning.versaoResumida)}</p>
         </CardContent>
       </Card>
 
@@ -303,7 +323,7 @@ export default function Resultado() {
 
         <Section title="Sequência Didática">
           <div className="space-y-2">
-            {planning.sequenciaDidatica.map((step, i) => (
+            {toStringArray(planning.sequenciaDidatica).map((step, i) => (
               <div key={i} className="flex gap-3">
                 <span className="flex-shrink-0 w-6 h-6 bg-primary/10 text-primary rounded-full text-xs font-semibold flex items-center justify-center">
                   {i + 1}

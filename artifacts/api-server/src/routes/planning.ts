@@ -107,18 +107,35 @@ router.post("/planning/generate", async (req, res) => {
 
     const planning = JSON.parse(content);
 
-    const required = [
-      "tema", "objetivoGeral", "objetivosEspecificos", "competencias",
-      "habilidades", "metodologia", "sequenciaDidatica", "atividadeInicial",
+    const arrayFields = [
+      "objetivosEspecificos", "competencias", "habilidades",
+      "sequenciaDidatica", "criteriosAvaliativos", "recursosNecessarios", "sugestoesExtras"
+    ];
+    const stringFields = [
+      "tema", "objetivoGeral", "metodologia", "atividadeInicial",
       "desenvolvimento", "atividadePratica", "encerramento", "avaliacao",
-      "criteriosAvaliativos", "estrategiasInclusivas", "adaptacoesDificuldades",
-      "recursosNecessarios", "tarefaCasa", "observacoesPedagogicas",
-      "versaoResumida", "sugestoesExtras"
+      "estrategiasInclusivas", "adaptacoesDificuldades", "tarefaCasa",
+      "observacoesPedagogicas", "versaoResumida"
     ];
 
-    for (const field of required) {
-      if (!(field in planning)) {
-        planning[field] = Array.isArray(planning[field]) ? [] : "Não gerado";
+    function anyToString(v: unknown): string {
+      if (typeof v === "string") return v;
+      if (v === null || v === undefined) return "";
+      if (Array.isArray(v)) return (v as unknown[]).map(anyToString).join(" | ");
+      if (typeof v === "object") return Object.entries(v as Record<string, unknown>).map(([k, val]) => `${k}: ${anyToString(val)}`).join(" | ");
+      return String(v);
+    }
+
+    for (const field of arrayFields) {
+      if (!Array.isArray(planning[field])) {
+        planning[field] = planning[field] != null ? [anyToString(planning[field])] : [];
+      } else {
+        planning[field] = (planning[field] as unknown[]).map(anyToString);
+      }
+    }
+    for (const field of stringFields) {
+      if (typeof planning[field] !== "string") {
+        planning[field] = planning[field] != null ? anyToString(planning[field]) : "Não gerado";
       }
     }
 
