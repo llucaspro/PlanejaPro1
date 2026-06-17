@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Loader2, BookMarked, ArrowLeft, ChevronRight, Download,
-  Copy, CheckCircle, Target, BookOpen, Users, CheckSquare,
+  Copy, CheckCircle, Target, BookOpen, Users, CheckSquare, Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,9 +63,37 @@ interface Result {
   observacoesPedagogicas: string;
 }
 
+const WA_LINK = "https://wa.me/5514997966714?text=Ol%C3%A1!%20Gostaria%20de%20liberar%20meu%20acesso%20Premium%20ao%20PlanejaPro.";
+
+function PremiumOverlay({ tool }: { tool: string }) {
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3 }}
+        className="bg-card border border-border shadow-2xl rounded-2xl p-8 max-w-sm w-full text-center"
+      >
+        <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Lock className="h-7 w-7 text-amber-600 dark:text-amber-400" />
+        </div>
+        <h2 className="text-xl font-bold font-serif text-foreground mb-2">🔒 {tool} Premium</h2>
+        <p className="text-muted-foreground text-sm mb-5 leading-relaxed">
+          Esta ferramenta está disponível apenas para assinantes Premium. Libere o acesso para usar com IA ilimitada.
+        </p>
+        <Button asChild size="lg" className="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold gap-2">
+          <a href={WA_LINK} target="_blank" rel="noopener noreferrer">Solicitar Acesso Premium</a>
+        </Button>
+        <p className="text-xs text-muted-foreground mt-3">Atendimento via WhatsApp · Acesso imediato após confirmação</p>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function SequenciaDidatica() {
   const [, navigate] = useLocation();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isPremium = user?.isPremium ?? false;
   const [result, setResult] = useState<Result | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [aulaAberta, setAulaAberta] = useState<number>(0);
@@ -144,7 +172,9 @@ export default function SequenciaDidatica() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="relative">
+      {!isPremium && <PremiumOverlay tool="Sequência Didática" />}
+      <div className={`max-w-3xl mx-auto ${!isPremium ? "blur-sm pointer-events-none select-none" : ""}`}>
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
         <Button variant="ghost" size="sm" className="mb-4 gap-1 -ml-2" onClick={() => navigate(-1 as never)}>
           <ArrowLeft className="h-4 w-4" /> Voltar
@@ -374,6 +404,7 @@ export default function SequenciaDidatica() {
           )}
         </AnimatePresence>
       </motion.div>
+      </div>
     </div>
   );
 }
