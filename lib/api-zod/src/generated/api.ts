@@ -83,3 +83,48 @@ export const AssistantChatResponse = zod.object({
 })
 
 
+/**
+ * Recebe parâmetros da prova e retorna questões geradas pela IA prontas para impressão
+ * @summary Gera prova completa com IA
+ */
+export const generateExamBodyQuestoesDiscursivasMax = 8;
+export const generateExamBodyQuestoesAlternativasMax = 20;
+
+export const GenerateExamBody = zod.object({
+  "nomeEscola": zod.string().optional().describe('Nome da escola'),
+  "nomeProfessor": zod.string().optional().describe('Nome do professor'),
+  "disciplina": zod.string().describe('Disciplina da prova'),
+  "anoSerie": zod.string().describe('Ano\/Série'),
+  "turma": zod.string().optional().describe('Turma'),
+  "bimestre": zod.string().optional().describe('Bimestre\/Trimestre (ex. 1º Bimestre)'),
+  "conteudo": zod.string().describe('Conteúdo que será cobrado na prova'),
+  "questoesDiscursivas": zod.number().min(0).max(generateExamBodyQuestoesDiscursivasMax).describe('Número de questões discursivas (0 a 8)'),
+  "questoesAlternativas": zod.number().min(0).max(generateExamBodyQuestoesAlternativasMax).describe('Número de questões de múltipla escolha (0 a 20)'),
+  "instrucoes": zod.string().optional().describe('Instruções adicionais para os alunos'),
+  "valorTotal": zod.number().optional().describe('Valor total da prova em pontos')
+})
+
+export const GenerateExamResponse = zod.object({
+  "titulo": zod.string(),
+  "instrucoes": zod.string(),
+  "questoesAlternativas": zod.array(zod.object({
+    "numero": zod.number(),
+    "enunciado": zod.string(),
+    "alternativas": zod.object({
+      "a": zod.string(),
+      "b": zod.string(),
+      "c": zod.string(),
+      "d": zod.string(),
+      "e": zod.string()
+    }),
+    "gabarito": zod.string(),
+    "valor": zod.number().optional()
+  })),
+  "questoesDiscursivas": zod.array(zod.object({
+    "numero": zod.number(),
+    "enunciado": zod.string(),
+    "linhasResposta": zod.number().optional(),
+    "valor": zod.number(),
+    "criterios": zod.string().optional()
+  }))
+})
