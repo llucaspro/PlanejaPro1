@@ -1,11 +1,11 @@
 import { Router } from "express";
-import OpenAI from "openai";
-import { z } from "zod/v4";
+import { GoogleGenAI } from "@google/genai";
 import { GeneratePlanningBody } from "@workspace/api-zod";
+import type { z } from "zod";
 
 const router = Router();
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const SYSTEM_PROMPT = `Você é um especialista em pedagogia e didática brasileira, com profundo conhecimento em:
 - BNCC (Base Nacional Comum Curricular)
@@ -25,7 +25,7 @@ IMPORTANTE:
 - Respeite a realidade das escolas públicas brasileiras
 - O professor deve revisar e adaptar o planejamento à sua realidade
 
-Responda SEMPRE em JSON válido, seguindo exatamente o schema fornecido.`;
+Responda SEMPRE em JSON válido, sem markdown, sem blocos de código, apenas JSON puro.`;
 
 function buildPlanningPrompt(input: z.infer<typeof GeneratePlanningBody>): string {
   const perfis = input.perfilTurma?.join(", ") || "não especificado";
@@ -78,18 +78,28 @@ router.post("/planning/generate", async (req, res) => {
   }
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildPlanningPrompt(parsed.data) },
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: SYSTEM_PROMPT + "\n\n" + buildPlanningPrompt(parsed.data) }],
+        },
       ],
-      temperature: 0.7,
-      max_tokens: 4000,
-      response_format: { type: "json_object" },
+      config: {
+        maxOutputTokens: 8192,
+        temperature: 0.7,
+      },
     });
 
-    const content = completion.choices[0]?.message?.content;
+    let content = response.text ?? "";
+    content = content.trim();
+
+    // Remove markdown code fences if present
+    if (content.startsWith("```")) {
+      content = content.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+    }
+
     if (!content) {
       res.status(500).json({ error: "A IA não retornou conteúdo" });
       return;
@@ -97,7 +107,6 @@ router.post("/planning/generate", async (req, res) => {
 
     const planning = JSON.parse(content);
 
-    // Garantir que todos os campos obrigatórios existem
     const required = [
       "tema", "objetivoGeral", "objetivosEspecificos", "competencias",
       "habilidades", "metodologia", "sequenciaDidatica", "atividadeInicial",

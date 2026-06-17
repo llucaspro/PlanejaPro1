@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const SYSTEM_PROMPT = `Você é um especialista em pedagogia e didática brasileira, com profundo conhecimento em:
 - BNCC (Base Nacional Comum Curricular)
@@ -12,7 +12,7 @@ const SYSTEM_PROMPT = `Você é um especialista em pedagogia e didática brasile
 - Elaboração de sequências didáticas
 
 Gere planejamentos pedagógicos PRÁTICOS, DETALHADOS e APLICÁVEIS para professores brasileiros.
-Responda SEMPRE em JSON válido, sem markdown.`;
+Responda SEMPRE em JSON válido, sem markdown, sem blocos de código, apenas JSON puro.`;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -42,25 +42,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - Recursos: ${recursos}
 - Observações: ${body.observacoes || "nenhuma"}
 
-Retorne JSON com exatamente estas chaves:
+Retorne JSON com exatamente estas chaves (sem markdown, apenas JSON puro):
 tema, objetivoGeral, objetivosEspecificos (array), competencias (array), habilidades (array), metodologia, sequenciaDidatica (array), atividadeInicial, desenvolvimento, atividadePratica, encerramento, avaliacao, criteriosAvaliativos (array), estrategiasInclusivas, adaptacoesDificuldades, recursosNecessarios (array), tarefaCasa, observacoesPedagogicas, versaoResumida, sugestoesExtras (array)`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        { role: "user", parts: [{ text: SYSTEM_PROMPT + "\n\n" + userPrompt }] },
       ],
-      temperature: 0.7,
-      max_tokens: 4000,
-      response_format: { type: "json_object" },
+      config: {
+        maxOutputTokens: 8192,
+        temperature: 0.7,
+      },
     });
 
-    const content = completion.choices[0]?.message?.content;
+    let content = response.text ?? "";
+    content = content.trim();
+
+    // Remove markdown code fences if present
+    if (content.startsWith("```")) {
+      content = content.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+    }
+
     if (!content) return res.status(500).json({ error: "IA não retornou conteúdo" });
 
     const planning = JSON.parse(content);
+
+    const required = [
+      "tema", "objetivoGeral", "objetivosEspecificos", "competencias",
+      "habilidades", "metodologia", "sequenciaDidatica", "atividadeInicial",
+      "desenvolvimento", "atividadePratica", "encerramento", "avaliacao",
+      "criteriosAvaliativos", "estrategiasInclusivas", "adaptacoesDificuldades",
+      "recursosNecessarios", "tarefaCasa", "observacoesPedagogicas",
+      "versaoResumida", "sugestoesExtras"
+    ];
+    for (const field of required) {
+      if (!(field in planning)) {
+        planning[field] = Array.isArray(planning[field]) ? [] : "Não gerado";
+      }
+    }
+
     return res.status(200).json(planning);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro desconhecido";

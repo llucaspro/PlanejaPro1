@@ -1,10 +1,10 @@
 import { Router } from "express";
-import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 import { AssistantChatBody } from "@workspace/api-zod";
 
 const router = Router();
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const ASSISTANT_SYSTEM_PROMPT = `Você é um assistente pedagógico especializado para professores brasileiros da Educação Básica.
 
@@ -29,15 +29,7 @@ Como se comportar:
 - Considere a realidade das escolas públicas brasileiras: turmas grandes, recursos limitados
 - Seja encorajador, reconheça os desafios reais da profissão docente
 
-IMPORTANTE: Você é um copiloto pedagógico. Suas sugestões devem sempre ser revisadas e adaptadas pelo professor à sua realidade específica.
-
-Exemplos de como ajudar:
-- Criar atividades práticas para qualquer conteúdo
-- Adaptar aulas para alunos com necessidades específicas
-- Sugerir estratégias para engajar turmas desmotivadas
-- Transformar aulas expositivas em metodologias ativas
-- Criar rubricas e critérios de avaliação
-- Planejar projetos interdisciplinares`;
+IMPORTANTE: Você é um copiloto pedagógico. Suas sugestões devem sempre ser revisadas e adaptadas pelo professor à sua realidade específica.`;
 
 router.post("/assistant/chat", async (req, res) => {
   const parsed = AssistantChatBody.safeParse(req.body);
@@ -48,36 +40,37 @@ router.post("/assistant/chat", async (req, res) => {
 
   const { message, history = [], planningContext } = parsed.data;
 
+  const systemInstruction = planningContext
+    ? `${ASSISTANT_SYSTEM_PROMPT}\n\nContexto do planejamento atual do professor:\n${planningContext}`
+    : ASSISTANT_SYSTEM_PROMPT;
+
+  const contents = [];
+
+  for (const msg of history.slice(-10)) {
+    contents.push({
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: msg.content }],
+    });
+  }
+
+  contents.push({
+    role: "user",
+    parts: [{ text: message }],
+  });
+
   try {
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: "system", content: ASSISTANT_SYSTEM_PROMPT },
-    ];
-
-    if (planningContext) {
-      messages.push({
-        role: "system",
-        content: `Contexto do planejamento atual do professor:\n${planningContext}`,
-      });
-    }
-
-    for (const msg of history.slice(-10)) {
-      messages.push({
-        role: msg.role as "user" | "assistant",
-        content: msg.content,
-      });
-    }
-
-    messages.push({ role: "user", content: message });
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages,
-      temperature: 0.8,
-      max_tokens: 2000,
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents,
+      config: {
+        systemInstruction,
+        maxOutputTokens: 8192,
+        temperature: 0.8,
+      },
     });
 
-    const reply = completion.choices[0]?.message?.content;
-    if (!reply) {
+    const reply = response.text ?? "";
+    if (!reply.trim()) {
       res.status(500).json({ error: "A IA não retornou resposta" });
       return;
     }
