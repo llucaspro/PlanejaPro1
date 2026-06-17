@@ -203,36 +203,56 @@ async function handleImprove(body: Record<string, unknown>): Promise<{ prompt: s
 
   const focoKey = s(body.foco, 30);
   const foco = focusMap[focoKey] || "melhorias pedagógicas gerais";
-  const planejamentoResumido = typeof body.planejamento === "string"
-    ? body.planejamento.slice(0, 2000)
-    : JSON.stringify(body.planejamento).slice(0, 2000);
 
-  const prompt = `Você é um especialista em inovação pedagógica e metodologias ativas para a educação básica brasileira.
+  // Extract human-readable fields from the planning (frontend sends JSON.stringify(planning))
+  let planejamentoTexto = "";
+  const raw = body.planejamento;
 
-Com base neste planejamento, sugira melhorias com foco em: ${foco}
+  function extractPlanningFields(p: Record<string, unknown>): string {
+    const parts: string[] = [];
+    if (p.tema) parts.push("Tema: " + String(p.tema).slice(0, 150));
+    if (p.objetivoGeral) parts.push("Objetivo: " + String(p.objetivoGeral).slice(0, 250));
+    if (p.metodologia) parts.push("Metodologia: " + String(p.metodologia).slice(0, 250));
+    if (p.desenvolvimento) parts.push("Desenvolvimento: " + String(p.desenvolvimento).slice(0, 300));
+    if (p.atividadeInicial) parts.push("Atividade inicial: " + String(p.atividadeInicial).slice(0, 150));
+    if (p.atividadePratica) parts.push("Atividade prática: " + String(p.atividadePratica).slice(0, 150));
+    if (p.avaliacao) parts.push("Avaliação: " + String(p.avaliacao).slice(0, 150));
+    return parts.join("\n");
+  }
 
-Planejamento atual:
----
-${planejamentoResumido}
----
-
-Retorne APENAS JSON válido (sem markdown):
-{
-  "foco": "${focoKey || "geral"}",
-  "resumoMelhorias": "Resumo do que foi sugerido e por que melhora a aula",
-  "sugestoes": [
-    {
-      "titulo": "Nome da sugestão",
-      "descricao": "Como implementar",
-      "tempo": "Quanto tempo ocupa",
-      "materiais": ["Material 1"],
-      "beneficios": ["Benefício 1"],
-      "comoImplementar": "Passo a passo"
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      planejamentoTexto = extractPlanningFields(parsed);
+    } catch {
+      // Not valid JSON — use as plain text
+      planejamentoTexto = raw.slice(0, 800);
     }
-  ],
-  "dicasProfessor": ["Dica 1", "Dica 2", "Dica 3"]
-}`;
-  return { prompt, requestType: "planning_improve", config: { maxOutputTokens: 4096, temperature: 0.8 } };
+  } else if (raw && typeof raw === "object") {
+    planejamentoTexto = extractPlanningFields(raw as Record<string, unknown>);
+  }
+
+  if (!planejamentoTexto) planejamentoTexto = "Planejamento pedagógico a ser melhorado.";
+
+  const jsonTemplate = `{"foco":"${focoKey || "geral"}","resumoMelhorias":"...","sugestoes":[{"titulo":"...","descricao":"...","tempo":"...","materiais":["..."],"beneficios":["..."],"comoImplementar":"..."}],"dicasProfessor":["..."]}`;
+
+  const prompt = [
+    "Você é um especialista em inovação pedagógica para a educação básica brasileira.",
+    "",
+    "TAREFA: Sugira 3 melhorias práticas para o planejamento abaixo, com foco em: " + foco,
+    "",
+    "PLANEJAMENTO:",
+    planejamentoTexto,
+    "",
+    "REGRAS ABSOLUTAS:",
+    "1. Responda SOMENTE com JSON puro. Nada antes, nada depois.",
+    "2. Sem markdown, sem blocos de código, sem comentários.",
+    "3. Use aspas duplas em todas as strings.",
+    "4. Formato exato:",
+    jsonTemplate,
+  ].join("\n");
+
+  return { prompt, requestType: "planning_improve", config: { maxOutputTokens: 4096, temperature: 0.7 } };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

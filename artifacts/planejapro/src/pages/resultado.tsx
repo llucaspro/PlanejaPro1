@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Download, Save, Copy, ArrowLeft, Shield, CheckCircle,
   FileText, ChevronDown, ChevronUp, Loader2, FileQuestion,
-  Sparkles, X, Clock, BookOpen,
+  Sparkles, X, Clock, BookOpen, Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -483,7 +483,7 @@ export default function Resultado() {
   const [melhoriaLoading, setMelhoriaLoading] = useState(false);
   const [melhoriaResult, setMelhoriaResult] = useState<MelhoriaResult | null>(null);
   const { savePlanning } = usePlannings();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
 
   useEffect(() => {
     const resultStr = sessionStorage.getItem("planejapro_result");
@@ -651,6 +651,7 @@ export default function Resultado() {
             >
               <Sparkles className="h-4 w-4" />
               Melhorar Aula
+              {!user?.isPremium && <Lock className="h-3 w-3 opacity-70" />}
             </Button>
           </div>
         </div>
@@ -665,7 +666,32 @@ export default function Resultado() {
             exit={{ opacity: 0, y: -10 }}
             className="mb-6"
           >
-            <Card className="border-emerald-200 dark:border-emerald-800">
+            <Card className="border-emerald-200 dark:border-emerald-800 relative overflow-hidden">
+
+              {/* PRO overlay for non-premium users */}
+              {!user?.isPremium && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center p-4 bg-background/60 backdrop-blur-sm rounded-xl">
+                  <div className="bg-card border border-border shadow-xl rounded-2xl p-6 max-w-xs w-full text-center">
+                    <div className="w-12 h-12 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Lock className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <h3 className="font-bold text-foreground mb-1">Recurso Premium</h3>
+                    <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+                      Melhore sua aula com sugestões de IA: dinâmicas, gamificação, metodologias ativas e muito mais.
+                    </p>
+                    <Button asChild size="sm" className="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold gap-2">
+                      <a
+                        href="https://wa.me/5514997966714?text=Ol%C3%A1!%20Gostaria%20de%20liberar%20meu%20acesso%20Premium%20ao%20PlanejaPro."
+                        target="_blank" rel="noopener noreferrer"
+                      >
+                        Solicitar Acesso Premium
+                      </a>
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-2">Atendimento via WhatsApp · Acesso imediato</p>
+                  </div>
+                </div>
+              )}
+
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
@@ -677,7 +703,7 @@ export default function Resultado() {
                 </div>
                 <p className="text-xs text-muted-foreground">Escolha um foco e a IA vai sugerir melhorias práticas para esta aula</p>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className={`space-y-4 ${!user?.isPremium ? "blur-sm pointer-events-none select-none" : ""}`}>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {MELHORIA_FOCOS.map((f) => (
                     <button
