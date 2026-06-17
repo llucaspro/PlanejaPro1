@@ -209,7 +209,7 @@ async function generateExamPdf(exam: GeneratedExam, input: ExamInput | null, sho
   y += instrH + 6;
 
   // ── Section Banner helper ────────────────────────────────────────────────────
-  function drawSectionBanner(label: string, total: number) {
+  function drawSectionBanner(label: string, _total: number) {
     checkSpace(12);
     doc.setFillColor(...C_BLUE);
     doc.rect(MARGIN, y, CW, 9, "F");
@@ -217,79 +217,74 @@ async function generateExamPdf(exam: GeneratedExam, input: ExamInput | null, sho
     doc.setFontSize(9);
     doc.setTextColor(...C_WHITE);
     doc.text(label, MARGIN + 5, y + 6.2);
-    if (total > 0) {
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      doc.text(`Total: ${total.toFixed(1)} pts`, PW - MARGIN - 3, y + 6.2, { align: "right" });
-    }
     y += 12;
   }
 
   // ── Multiple Choice ──────────────────────────────────────────────────────────
   if (exam.questoesAlternativas && exam.questoesAlternativas.length > 0) {
-    const totalAlt = exam.questoesAlternativas.reduce((s, q) => s + (q.valor ?? 0), 0);
     const label = exam.questoesAlternativas.length === 1
       ? "QUESTÃO DE MÚLTIPLA ESCOLHA"
       : `QUESTÕES DE MÚLTIPLA ESCOLHA (${exam.questoesAlternativas.length} questões)`;
-    drawSectionBanner(label, totalAlt);
+    drawSectionBanner(label, 0);
 
     const ENUNC_X = MARGIN + 8;
-    const ENUNC_W = CW - 8;    // enunciado text area
-    const CIRC_X = MARGIN + 8; // circle center
-    const ALT_X = MARGIN + 17; // alt text starts here
-    const ALT_W = CW - 17;     // alt text max width
+    const ENUNC_W = CW - 10;   // safe width for enunciado text
+    const CIRC_X = MARGIN + 8; // circle center x
+    const ALT_X = MARGIN + 17; // alt text start x
+    const ALT_W = CW - 19;     // alt text max width
 
     for (const q of exam.questoesAlternativas) {
-      const enuncLines = doc.splitTextToSize(q.enunciado, ENUNC_W - 6) as string[];
-      const enuncH = enuncLines.length * 5.5;
+      // IMPORTANT: set font BEFORE splitTextToSize so line breaks are accurate
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      const enuncLines = doc.splitTextToSize(q.enunciado, ENUNC_W) as string[];
+      const enuncH = enuncLines.length * 6;
+
       const altKeys = ["a", "b", "c", "d", "e"] as const;
-      const altHeights = altKeys.map(k => {
-        const ls = doc.splitTextToSize(q.alternativas[k] ?? "", ALT_W) as string[];
-        return ls.length * 5.5;
+      // pre-compute alt lines with correct font
+      const altLinesList = altKeys.map(k => {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        return doc.splitTextToSize(q.alternativas[k] ?? "", ALT_W) as string[];
       });
-      const totalQH = 10 + enuncH + altHeights.reduce((a, b) => a + b, 0) + altKeys.length * 3 + 6;
-      checkSpace(Math.min(totalQH, 60));
+      const altTotalH = altLinesList.reduce((s, ls) => s + ls.length * 6 + 4, 0);
+      checkSpace(Math.min(enuncH + 12 + altTotalH, 70));
 
-      // question number + enunciado
+      // enunciado background
+      const rectH = enuncH + 10;
       doc.setFillColor(...C_BG);
-      doc.rect(MARGIN, y, CW, enuncH + 8, "F");
+      doc.rect(MARGIN, y, CW, rectH, "F");
 
+      // number
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
       doc.setTextColor(...C_BLUE);
-      doc.text(`${q.numero}.`, MARGIN + 2, y + 6);
+      doc.text(`${q.numero}.`, MARGIN + 2, y + 7);
 
+      // enunciado text
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       doc.setTextColor(...C_DARK);
       for (let li = 0; li < enuncLines.length; li++) {
-        doc.text(enuncLines[li], ENUNC_X, y + 6 + li * 5.5);
+        doc.text(enuncLines[li], ENUNC_X, y + 7 + li * 6);
       }
-
-      if (q.valor) {
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(7.5);
-        doc.setTextColor(...C_GRAY);
-        doc.text(`(${q.valor.toFixed(1)} pts)`, PW - MARGIN - 2, y + 6, { align: "right" });
-      }
-      y += enuncH + 10;
+      y += rectH + 2;
 
       // alternatives
       for (let ai = 0; ai < altKeys.length; ai++) {
         const key = altKeys[ai];
-        const altVal = q.alternativas[key] ?? "";
-        const lines = doc.splitTextToSize(altVal, ALT_W) as string[];
-        const rowH = lines.length * 5.5 + 4;
+        const lines = altLinesList[ai];
+        const rowH = lines.length * 6 + 4;
         const isCorrect = showGabarito && q.gabarito === key;
 
-        checkSpace(rowH + 1);
+        checkSpace(rowH + 2);
 
         if (isCorrect) {
           doc.setFillColor(240, 253, 244);
-          doc.rect(MARGIN, y - 1, CW, rowH, "F");
+          doc.rect(MARGIN, y, CW, rowH, "F");
         }
 
-        const cy = y + rowH / 2 - 1;
+        const cy = y + rowH / 2;
         doc.setDrawColor(...C_LINE);
         doc.setLineWidth(0.3);
         if (isCorrect) {
@@ -311,7 +306,7 @@ async function generateExamPdf(exam: GeneratedExam, input: ExamInput | null, sho
         doc.setFontSize(10);
         doc.setTextColor(isCorrect ? C_GREEN[0] : C_DARK[0], isCorrect ? C_GREEN[1] : C_DARK[1], isCorrect ? C_GREEN[2] : C_DARK[2]);
         for (let li = 0; li < lines.length; li++) {
-          doc.text(lines[li], ALT_X, y + 4.5 + li * 5.5);
+          doc.text(lines[li], ALT_X, y + 5 + li * 6);
         }
         y += rowH + 1;
       }
@@ -320,49 +315,45 @@ async function generateExamPdf(exam: GeneratedExam, input: ExamInput | null, sho
       doc.setDrawColor(...C_LINE);
       doc.setLineWidth(0.2);
       doc.line(MARGIN, y + 2, PW - MARGIN, y + 2);
-      y += 7;
+      y += 8;
     }
   }
 
   // ── Discursive ───────────────────────────────────────────────────────────────
   if (exam.questoesDiscursivas && exam.questoesDiscursivas.length > 0) {
     y += 2;
-    const totalDisc = exam.questoesDiscursivas.reduce((s, q) => s + (q.valor ?? 0), 0);
     const discLabel = exam.questoesDiscursivas.length === 1
       ? "QUESTÃO DISCURSIVA"
       : `QUESTÕES DISCURSIVAS (${exam.questoesDiscursivas.length} questões)`;
-    drawSectionBanner(discLabel, totalDisc);
+    drawSectionBanner(discLabel, 0);
 
     const ENUNC_X = MARGIN + 8;
     const ENUNC_W = CW - 10;
 
     for (const q of exam.questoesDiscursivas) {
+      // set font BEFORE splitTextToSize
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
       const enuncLines = doc.splitTextToSize(q.enunciado, ENUNC_W) as string[];
-      const enuncH = enuncLines.length * 5.5;
+      const enuncH = enuncLines.length * 6;
       checkSpace(enuncH + 20);
 
+      const rectH = enuncH + 10;
       doc.setFillColor(...C_BG);
-      doc.rect(MARGIN, y, CW, enuncH + 8, "F");
+      doc.rect(MARGIN, y, CW, rectH, "F");
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
       doc.setTextColor(...C_BLUE);
-      doc.text(`${q.numero}.`, MARGIN + 2, y + 6);
-
-      if (q.valor) {
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(7.5);
-        doc.setTextColor(...C_GRAY);
-        doc.text(`(${q.valor.toFixed(1)} pts)`, PW - MARGIN - 2, y + 6, { align: "right" });
-      }
+      doc.text(`${q.numero}.`, MARGIN + 2, y + 7);
 
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       doc.setTextColor(...C_DARK);
       for (let li = 0; li < enuncLines.length; li++) {
-        doc.text(enuncLines[li], ENUNC_X, y + 6 + li * 5.5);
+        doc.text(enuncLines[li], ENUNC_X, y + 7 + li * 6);
       }
-      y += enuncH + 10;
+      y += rectH + 4;
 
       if (showGabarito && q.criterios) {
         const critLines = doc.splitTextToSize(`Critérios: ${q.criterios}`, CW - 8) as string[];
