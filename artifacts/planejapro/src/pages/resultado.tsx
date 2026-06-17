@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   Download, Save, Copy, ArrowLeft, Shield, CheckCircle,
-  FileText, ChevronDown, ChevronUp
+  FileText, ChevronDown, ChevronUp, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,29 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { usePlannings } from "@/hooks/use-plannings";
 import type { GeneratedPlanning, PlanningInput } from "@workspace/api-client-react";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function toStr(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(toStr).join("\n");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${k}: ${toStr(v)}`)
+      .join(" | ");
+  }
+  return String(value);
+}
+
+function toArr(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(toStr);
+  if (typeof value === "string") return value.split("\n").filter(Boolean);
+  return [toStr(value)].filter(Boolean);
+}
+
+// ── UI Components ─────────────────────────────────────────────────────────────
 
 function Section({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -35,27 +58,8 @@ function Section({ title, children, defaultOpen = true }: { title: string; child
   );
 }
 
-function toDisplayString(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value === null || value === undefined) return "";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.map(toDisplayString).join("\n");
-  if (typeof value === "object") {
-    return Object.entries(value as Record<string, unknown>)
-      .map(([k, v]) => `${k}: ${toDisplayString(v)}`)
-      .join(" | ");
-  }
-  return String(value);
-}
-
-function toStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(toDisplayString);
-  if (typeof value === "string") return value.split("\n").filter(Boolean);
-  return [toDisplayString(value)].filter(Boolean);
-}
-
 function StringList({ items }: { items: unknown[] }) {
-  const strs = toStringArray(items);
+  const strs = toArr(items);
   return (
     <ul className="space-y-1.5">
       {strs.map((item, i) => (
@@ -69,23 +73,392 @@ function StringList({ items }: { items: unknown[] }) {
 }
 
 function TextBlock({ text }: { text: unknown }) {
-  return <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{toDisplayString(text)}</p>;
+  return <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{toStr(text)}</p>;
 }
+
+// ── TXT Export ────────────────────────────────────────────────────────────────
+
+function buildTxt(planning: GeneratedPlanning, input: PlanningInput | null): string {
+  const pad = (s: string, n = 60) => s.padEnd(n, " ");
+  const bar = (char: string, n = 60) => char.repeat(n);
+  const section = (title: string) => [
+    "",
+    bar("─"),
+    `  ${title.toUpperCase()}`,
+    bar("─"),
+  ];
+  const bullet = (items: unknown[]) => toArr(items).map(s => `  • ${s}`);
+  const numbered = (items: unknown[]) => toArr(items).map((s, i) => `  ${i + 1}. ${s}`);
+  const indent = (text: unknown) =>
+    toStr(text).split("\n").map(l => `  ${l}`);
+
+  const meta = [
+    input?.disciplina && `Disciplina: ${input.disciplina}`,
+    input?.anoSerie && `Ano/Série: ${input.anoSerie}`,
+    input?.turma && `Turma: ${input.turma}`,
+    input?.quantidadeAulas && `Aulas: ${input.quantidadeAulas} x ${input?.duracaoAula ?? "?"}min`,
+    `Data: ${new Date().toLocaleDateString("pt-BR")}`,
+  ].filter(Boolean);
+
+  const lines: string[] = [
+    bar("═"),
+    pad("  PLANEJAMENTO PEDAGÓGICO — PlanejaPro"),
+    bar("═"),
+    "",
+    ...meta.map(m => `  ${m}`),
+    "",
+    `  TEMA: ${toStr(planning.tema)}`,
+    "",
+    bar("═"),
+
+    ...section("Resumo Executivo"),
+    "",
+    ...indent(planning.versaoResumida),
+
+    ...section("Objetivo Geral"),
+    "",
+    ...indent(planning.objetivoGeral),
+
+    ...section("Objetivos Específicos"),
+    "",
+    ...bullet(planning.objetivosEspecificos ?? []),
+
+    ...section("Competências (BNCC)"),
+    "",
+    ...bullet(planning.competencias ?? []),
+
+    ...section("Habilidades (BNCC)"),
+    "",
+    ...bullet(planning.habilidades ?? []),
+
+    ...section("Metodologia"),
+    "",
+    ...indent(planning.metodologia),
+
+    ...section("Sequência Didática"),
+    "",
+    ...numbered(planning.sequenciaDidatica ?? []),
+
+    ...section("Atividade Inicial"),
+    "",
+    ...indent(planning.atividadeInicial),
+
+    ...section("Desenvolvimento Principal"),
+    "",
+    ...indent(planning.desenvolvimento),
+
+    ...section("Atividade Prática"),
+    "",
+    ...indent(planning.atividadePratica),
+
+    ...section("Encerramento"),
+    "",
+    ...indent(planning.encerramento),
+
+    ...section("Avaliação"),
+    "",
+    ...indent(planning.avaliacao),
+
+    ...section("Critérios Avaliativos"),
+    "",
+    ...bullet(planning.criteriosAvaliativos ?? []),
+
+    ...section("Estratégias Inclusivas"),
+    "",
+    ...indent(planning.estrategiasInclusivas),
+
+    ...section("Adaptações para Dificuldades"),
+    "",
+    ...indent(planning.adaptacoesDificuldades),
+
+    ...section("Recursos Necessários"),
+    "",
+    ...bullet(planning.recursosNecessarios ?? []),
+
+    ...section("Tarefa de Casa"),
+    "",
+    ...indent(planning.tarefaCasa),
+
+    ...section("Observações Pedagógicas"),
+    "",
+    ...indent(planning.observacoesPedagogicas),
+
+    ...section("Sugestões Extras"),
+    "",
+    ...bullet(planning.sugestoesExtras ?? []),
+
+    "",
+    bar("═"),
+    "  Gerado por PlanejaPro — Revise e adapte conforme sua realidade.",
+    "  O professor é o responsável final pelo conteúdo apresentado.",
+    bar("═"),
+  ];
+
+  // BOM (byte order mark) garante que editores abram como UTF-8
+  return "\uFEFF" + lines.join("\n");
+}
+
+// ── PDF Export ────────────────────────────────────────────────────────────────
+
+async function generateAndDownloadPdf(planning: GeneratedPlanning, input: PlanningInput | null) {
+  const { default: jsPDF } = await import("jspdf");
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  const PW = 210;
+  const MARGIN = 14;
+  const CW = PW - MARGIN * 2;
+  const PH = 297;
+  const FOOTER_H = 12;
+  const CONTENT_BOTTOM = PH - FOOTER_H - 4;
+
+  // Brand colours
+  const C_BLUE: [number, number, number] = [37, 99, 235];
+  const C_BLUE_LIGHT: [number, number, number] = [219, 234, 254];
+  const C_DARK: [number, number, number] = [17, 24, 39];
+  const C_GRAY: [number, number, number] = [107, 114, 128];
+  const C_WHITE: [number, number, number] = [255, 255, 255];
+  const C_BG: [number, number, number] = [249, 250, 251];
+
+  let y = 0;
+  let pageNum = 1;
+
+  // ── footer ──────────────────────────────────────────────────────────────
+  function drawFooter() {
+    const fy = PH - FOOTER_H;
+    doc.setFillColor(...C_BLUE);
+    doc.rect(0, fy, PW, FOOTER_H, "F");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...C_WHITE);
+    doc.text("PlanejaPro — Revise e adapte conforme sua realidade", MARGIN, fy + 7.5);
+    doc.text(`Pág. ${pageNum}`, PW - MARGIN, fy + 7.5, { align: "right" });
+  }
+
+  // ── new page ─────────────────────────────────────────────────────────────
+  function newPage() {
+    drawFooter();
+    doc.addPage();
+    pageNum++;
+    y = MARGIN + 4;
+  }
+
+  function checkSpace(needed: number) {
+    if (y + needed > CONTENT_BOTTOM) newPage();
+  }
+
+  // ── cover / header ───────────────────────────────────────────────────────
+  // Blue top bar
+  doc.setFillColor(...C_BLUE);
+  doc.rect(0, 0, PW, 26, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(...C_WHITE);
+  doc.text("PlanejaPro", MARGIN, 16);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.text(new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" }), PW - MARGIN, 16, { align: "right" });
+
+  y = 34;
+
+  // Subject title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(...C_DARK);
+  const titleLines = doc.splitTextToSize(toStr(planning.tema).toUpperCase(), CW) as string[];
+  doc.text(titleLines, MARGIN, y);
+  y += titleLines.length * 8 + 4;
+
+  // Metadata badges (simulated as rounded boxes)
+  const badges = [
+    input?.disciplina,
+    input?.anoSerie,
+    input?.turma ? `Turma ${input.turma}` : null,
+    input?.quantidadeAulas ? `${input.quantidadeAulas} aula${input.quantidadeAulas !== 1 ? "s" : ""} × ${input?.duracaoAula ?? "?"}min` : null,
+  ].filter(Boolean) as string[];
+
+  let bx = MARGIN;
+  doc.setFontSize(8.5);
+  for (const badge of badges) {
+    const bw = doc.getTextWidth(badge) + 6;
+    if (bx + bw > PW - MARGIN) { bx = MARGIN; y += 8; }
+    doc.setFillColor(...C_BLUE_LIGHT);
+    doc.roundedRect(bx, y - 4.5, bw, 6.5, 1.5, 1.5, "F");
+    doc.setTextColor(...C_BLUE);
+    doc.setFont("helvetica", "bold");
+    doc.text(badge, bx + 3, y);
+    bx += bw + 3;
+  }
+  y += 10;
+
+  // Thin separator line
+  doc.setDrawColor(...C_BLUE_LIGHT);
+  doc.setLineWidth(0.4);
+  doc.line(MARGIN, y, PW - MARGIN, y);
+  y += 6;
+
+  // ── section helper ───────────────────────────────────────────────────────
+  function sectionHeader(title: string) {
+    checkSpace(12);
+    doc.setFillColor(...C_BLUE);
+    doc.rect(MARGIN, y, CW, 8, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...C_WHITE);
+    doc.text(title.toUpperCase(), MARGIN + 4, y + 5.5);
+    y += 11;
+  }
+
+  function addParagraph(text: unknown, fontSize = 9.5) {
+    const str = toStr(text);
+    if (!str) return;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(fontSize);
+    doc.setTextColor(...C_DARK);
+    const wrapped = doc.splitTextToSize(str, CW - 4) as string[];
+    for (const line of wrapped) {
+      checkSpace(5.5);
+      doc.text(line, MARGIN + 2, y);
+      y += 5.5;
+    }
+    y += 2;
+  }
+
+  function addBulletList(items: unknown[], numbered = false) {
+    const arr = toArr(items);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...C_DARK);
+    for (let i = 0; i < arr.length; i++) {
+      const prefix = numbered ? `${i + 1}.` : "•";
+      const indent = numbered ? 7 : 5;
+      const wrapped = doc.splitTextToSize(arr[i], CW - indent - 4) as string[];
+      checkSpace(5.5 * wrapped.length + 1);
+      doc.setFont("helvetica", "bold");
+      doc.text(prefix, MARGIN + 2, y);
+      doc.setFont("helvetica", "normal");
+      for (let j = 0; j < wrapped.length; j++) {
+        doc.text(wrapped[j], MARGIN + 2 + indent, y);
+        y += 5.5;
+      }
+      y += 1;
+    }
+    y += 1;
+  }
+
+  function subLabel(label: string) {
+    checkSpace(8);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(...C_GRAY);
+    doc.text(label.toUpperCase(), MARGIN + 2, y);
+    y += 5;
+  }
+
+  // ── Resumo Executivo ─────────────────────────────────────────────────────
+  // Highlighted box
+  checkSpace(20);
+  const resumo = toStr(planning.versaoResumida);
+  const resumoLines = doc.splitTextToSize(resumo, CW - 8) as string[];
+  const resumoH = resumoLines.length * 5.5 + 8;
+  doc.setFillColor(...C_BG);
+  doc.rect(MARGIN, y, CW, resumoH, "F");
+  doc.setDrawColor(...C_BLUE_LIGHT);
+  doc.setLineWidth(0.6);
+  doc.rect(MARGIN, y, 2.5, resumoH, "F");
+  doc.setFillColor(...C_BLUE);
+  doc.rect(MARGIN, y, 2.5, resumoH, "F");
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9.5);
+  doc.setTextColor(...C_DARK);
+  y += 5;
+  for (const line of resumoLines) {
+    doc.text(line, MARGIN + 6, y);
+    y += 5.5;
+  }
+  y += 6;
+
+  // ── Objetivos ─────────────────────────────────────────────────────────────
+  sectionHeader("Objetivos");
+  subLabel("Objetivo Geral");
+  addParagraph(planning.objetivoGeral);
+  subLabel("Objetivos Específicos");
+  addBulletList(planning.objetivosEspecificos ?? []);
+
+  // ── Competências e Habilidades ────────────────────────────────────────────
+  sectionHeader("Competências e Habilidades (BNCC)");
+  subLabel("Competências");
+  addBulletList(planning.competencias ?? []);
+  subLabel("Habilidades");
+  addBulletList(planning.habilidades ?? []);
+
+  // ── Metodologia ───────────────────────────────────────────────────────────
+  sectionHeader("Metodologia");
+  addParagraph(planning.metodologia);
+
+  // ── Sequência Didática ────────────────────────────────────────────────────
+  sectionHeader("Sequência Didática");
+  addBulletList(planning.sequenciaDidatica ?? [], true);
+
+  // ── Desenvolvimento das Aulas ─────────────────────────────────────────────
+  sectionHeader("Desenvolvimento das Aulas");
+  subLabel("Atividade Inicial");
+  addParagraph(planning.atividadeInicial);
+  subLabel("Desenvolvimento Principal");
+  addParagraph(planning.desenvolvimento);
+  subLabel("Atividade Prática");
+  addParagraph(planning.atividadePratica);
+  subLabel("Encerramento");
+  addParagraph(planning.encerramento);
+
+  // ── Avaliação ─────────────────────────────────────────────────────────────
+  sectionHeader("Avaliação");
+  subLabel("Estratégia de Avaliação");
+  addParagraph(planning.avaliacao);
+  subLabel("Critérios Avaliativos");
+  addBulletList(planning.criteriosAvaliativos ?? []);
+
+  // ── Inclusão e Adaptações ─────────────────────────────────────────────────
+  sectionHeader("Inclusão e Adaptações");
+  subLabel("Estratégias Inclusivas");
+  addParagraph(planning.estrategiasInclusivas);
+  subLabel("Adaptações para Dificuldades");
+  addParagraph(planning.adaptacoesDificuldades);
+
+  // ── Recursos e Tarefa ────────────────────────────────────────────────────
+  sectionHeader("Recursos e Tarefa de Casa");
+  subLabel("Recursos Necessários");
+  addBulletList(planning.recursosNecessarios ?? []);
+  subLabel("Tarefa de Casa");
+  addParagraph(planning.tarefaCasa);
+
+  // ── Observações e Sugestões ──────────────────────────────────────────────
+  sectionHeader("Observações e Sugestões Extras");
+  subLabel("Observações Pedagógicas");
+  addParagraph(planning.observacoesPedagogicas);
+  subLabel("Sugestões Extras");
+  addBulletList(planning.sugestoesExtras ?? []);
+
+  drawFooter();
+
+  const slug = toStr(planning.tema).slice(0, 40).replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-]/g, "") || "planejamento";
+  doc.save(`planejamento-${slug}.pdf`);
+}
+
+// ── Page Component ────────────────────────────────────────────────────────────
 
 export default function Resultado() {
   const [, navigate] = useLocation();
   const [planning, setPlanning] = useState<GeneratedPlanning | null>(null);
   const [input, setInput] = useState<PlanningInput | null>(null);
   const [saved, setSaved] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const { savePlanning } = usePlannings();
 
   useEffect(() => {
     const resultStr = sessionStorage.getItem("planejapro_result");
     const inputStr = sessionStorage.getItem("planejapro_input");
-    if (!resultStr) {
-      navigate("/novo");
-      return;
-    }
+    if (!resultStr) { navigate("/novo"); return; }
     try {
       setPlanning(JSON.parse(resultStr));
       if (inputStr) setInput(JSON.parse(inputStr));
@@ -96,7 +469,7 @@ export default function Resultado() {
 
   const handleSave = () => {
     if (!planning || !input) return;
-    const titulo = planning.tema || `${input.disciplina} - ${input.anoSerie}`;
+    const titulo = toStr(planning.tema) || `${input.disciplina} - ${input.anoSerie}`;
     savePlanning({
       id: crypto.randomUUID(),
       titulo,
@@ -113,86 +486,34 @@ export default function Resultado() {
 
   const handleExportTxt = () => {
     if (!planning) return;
-    const lines: string[] = [
-      "PLANEJAMENTO PEDAGÓGICO — PlanejaPro",
-      "=".repeat(50),
-      "",
-      `TEMA: ${toDisplayString(planning.tema)}`,
-      "",
-      "OBJETIVO GERAL",
-      toDisplayString(planning.objetivoGeral),
-      "",
-      "OBJETIVOS ESPECÍFICOS",
-      ...toStringArray(planning.objetivosEspecificos).map(o => `• ${o}`),
-      "",
-      "COMPETÊNCIAS",
-      ...toStringArray(planning.competencias).map(c => `• ${c}`),
-      "",
-      "HABILIDADES",
-      ...toStringArray(planning.habilidades).map(h => `• ${h}`),
-      "",
-      "METODOLOGIA",
-      toDisplayString(planning.metodologia),
-      "",
-      "SEQUÊNCIA DIDÁTICA",
-      ...toStringArray(planning.sequenciaDidatica).map((s, i) => `${i + 1}. ${s}`),
-      "",
-      "ATIVIDADE INICIAL",
-      toDisplayString(planning.atividadeInicial),
-      "",
-      "DESENVOLVIMENTO",
-      toDisplayString(planning.desenvolvimento),
-      "",
-      "ATIVIDADE PRÁTICA",
-      toDisplayString(planning.atividadePratica),
-      "",
-      "ENCERRAMENTO",
-      toDisplayString(planning.encerramento),
-      "",
-      "AVALIAÇÃO",
-      toDisplayString(planning.avaliacao),
-      "",
-      "CRITÉRIOS AVALIATIVOS",
-      ...toStringArray(planning.criteriosAvaliativos).map(c => `• ${c}`),
-      "",
-      "ESTRATÉGIAS INCLUSIVAS",
-      toDisplayString(planning.estrategiasInclusivas),
-      "",
-      "ADAPTAÇÕES PARA DIFICULDADES",
-      toDisplayString(planning.adaptacoesDificuldades),
-      "",
-      "RECURSOS NECESSÁRIOS",
-      ...toStringArray(planning.recursosNecessarios).map(r => `• ${r}`),
-      "",
-      "TAREFA DE CASA",
-      toDisplayString(planning.tarefaCasa),
-      "",
-      "OBSERVAÇÕES PEDAGÓGICAS",
-      toDisplayString(planning.observacoesPedagogicas),
-      "",
-      "VERSÃO RESUMIDA",
-      toDisplayString(planning.versaoResumida),
-      "",
-      "SUGESTÕES EXTRAS",
-      ...toStringArray(planning.sugestoesExtras).map(s => `• ${s}`),
-      "",
-      "-".repeat(50),
-      "Gerado por PlanejaPro — Revise e adapte conforme sua realidade.",
-      `Data: ${new Date().toLocaleDateString("pt-BR")}`,
-    ];
-    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const content = buildTxt(planning, input);
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `planejamento-${planning.tema?.slice(0, 30).replace(/\s+/g, "-") || "aula"}.txt`;
+    a.download = `planejamento-${toStr(planning.tema).slice(0, 30).replace(/\s+/g, "-") || "aula"}.txt`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Arquivo TXT baixado!");
   };
 
+  const handleExportPdf = async () => {
+    if (!planning) return;
+    setPdfLoading(true);
+    try {
+      await generateAndDownloadPdf(planning, input);
+      toast.success("PDF baixado com sucesso!");
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao gerar PDF", { description: "Tente novamente." });
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   const handleCopyResumo = () => {
     if (!planning) return;
-    navigator.clipboard.writeText(toDisplayString(planning.versaoResumida));
+    navigator.clipboard.writeText(toStr(planning.versaoResumida));
     toast.success("Resumo copiado para a área de transferência!");
   };
 
@@ -221,7 +542,7 @@ export default function Resultado() {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold font-serif text-foreground leading-tight mb-2">
-              {toDisplayString(planning.tema)}
+              {toStr(planning.tema)}
             </h1>
             {input && (
               <div className="flex flex-wrap gap-2">
@@ -234,35 +555,20 @@ export default function Resultado() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={handleCopyResumo}
-            >
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleCopyResumo}>
               <Copy className="h-4 w-4" />
               Copiar resumo
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={handleExportTxt}
-            >
-              <Download className="h-4 w-4" />
-              Exportar TXT
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExportTxt}>
+              <FileText className="h-4 w-4" />
+              TXT
             </Button>
-            <Button
-              size="sm"
-              className="gap-1.5"
-              onClick={handleSave}
-              disabled={saved}
-            >
-              {saved ? (
-                <><CheckCircle className="h-4 w-4" /> Salvo</>
-              ) : (
-                <><Save className="h-4 w-4" /> Salvar</>
-              )}
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExportPdf} disabled={pdfLoading}>
+              {pdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              PDF
+            </Button>
+            <Button size="sm" className="gap-1.5" onClick={handleSave} disabled={saved}>
+              {saved ? <><CheckCircle className="h-4 w-4" /> Salvo</> : <><Save className="h-4 w-4" /> Salvar</>}
             </Button>
           </div>
         </div>
@@ -285,11 +591,11 @@ export default function Resultado() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-foreground leading-relaxed">{toDisplayString(planning.versaoResumida)}</p>
+          <p className="text-sm text-foreground leading-relaxed">{toStr(planning.versaoResumida)}</p>
         </CardContent>
       </Card>
 
-      {/* Seções do planejamento */}
+      {/* Seções */}
       <div className="space-y-3">
         <Section title="Objetivos">
           <div className="space-y-4">
@@ -299,7 +605,7 @@ export default function Resultado() {
             </div>
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Objetivos específicos</p>
-              <StringList items={planning.objetivosEspecificos} />
+              <StringList items={planning.objetivosEspecificos ?? []} />
             </div>
           </div>
         </Section>
@@ -308,11 +614,11 @@ export default function Resultado() {
           <div className="space-y-4">
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Competências</p>
-              <StringList items={planning.competencias} />
+              <StringList items={planning.competencias ?? []} />
             </div>
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Habilidades</p>
-              <StringList items={planning.habilidades} />
+              <StringList items={planning.habilidades ?? []} />
             </div>
           </div>
         </Section>
@@ -323,7 +629,7 @@ export default function Resultado() {
 
         <Section title="Sequência Didática">
           <div className="space-y-2">
-            {toStringArray(planning.sequenciaDidatica).map((step, i) => (
+            {toArr(planning.sequenciaDidatica ?? []).map((step, i) => (
               <div key={i} className="flex gap-3">
                 <span className="flex-shrink-0 w-6 h-6 bg-primary/10 text-primary rounded-full text-xs font-semibold flex items-center justify-center">
                   {i + 1}
@@ -336,22 +642,17 @@ export default function Resultado() {
 
         <Section title="Desenvolvimento das Aulas">
           <div className="space-y-4">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Atividade inicial</p>
-              <TextBlock text={planning.atividadeInicial} />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Desenvolvimento principal</p>
-              <TextBlock text={planning.desenvolvimento} />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Atividade prática</p>
-              <TextBlock text={planning.atividadePratica} />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Encerramento</p>
-              <TextBlock text={planning.encerramento} />
-            </div>
+            {[
+              { label: "Atividade inicial", val: planning.atividadeInicial },
+              { label: "Desenvolvimento principal", val: planning.desenvolvimento },
+              { label: "Atividade prática", val: planning.atividadePratica },
+              { label: "Encerramento", val: planning.encerramento },
+            ].map(({ label, val }) => (
+              <div key={label}>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">{label}</p>
+                <TextBlock text={val} />
+              </div>
+            ))}
           </div>
         </Section>
 
@@ -363,7 +664,7 @@ export default function Resultado() {
             </div>
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Critérios avaliativos</p>
-              <StringList items={planning.criteriosAvaliativos} />
+              <StringList items={planning.criteriosAvaliativos ?? []} />
             </div>
           </div>
         </Section>
@@ -385,7 +686,7 @@ export default function Resultado() {
           <div className="space-y-4">
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Recursos necessários</p>
-              <StringList items={planning.recursosNecessarios} />
+              <StringList items={planning.recursosNecessarios ?? []} />
             </div>
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Tarefa de casa</p>
@@ -402,7 +703,7 @@ export default function Resultado() {
             </div>
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Sugestões extras</p>
-              <StringList items={planning.sugestoesExtras} />
+              <StringList items={planning.sugestoesExtras ?? []} />
             </div>
           </div>
         </Section>
@@ -411,16 +712,12 @@ export default function Resultado() {
       {/* Footer actions */}
       <div className="mt-8 flex flex-col sm:flex-row gap-3 pb-8">
         <Button variant="outline" onClick={handleExportTxt} className="gap-2 flex-1">
-          <Download className="h-4 w-4" />
-          Exportar TXT
-        </Button>
-        <Button
-          variant="outline"
-          className="gap-2 flex-1"
-          onClick={() => toast.info("PDF em breve", { description: "Exportação em PDF será disponibilizada em breve." })}
-        >
           <FileText className="h-4 w-4" />
-          Exportar PDF (em breve)
+          Baixar TXT
+        </Button>
+        <Button variant="outline" onClick={handleExportPdf} disabled={pdfLoading} className="gap-2 flex-1">
+          {pdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          Baixar PDF
         </Button>
         <Button onClick={handleSave} disabled={saved} className="gap-2 flex-1">
           {saved ? <><CheckCircle className="h-4 w-4" /> Salvo</> : <><Save className="h-4 w-4" /> Salvar planejamento</>}
