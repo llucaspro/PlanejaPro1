@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   Download, Save, Copy, ArrowLeft, Shield, CheckCircle,
-  FileText, ChevronDown, ChevronUp, Loader2,
+  FileText, ChevronDown, ChevronUp, Loader2, FileQuestion,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -569,6 +569,25 @@ export default function Resultado() {
             </Button>
             <Button size="sm" className="gap-1.5" onClick={handleSave} disabled={saved}>
               {saved ? <><CheckCircle className="h-4 w-4" /> Salvo</> : <><Save className="h-4 w-4" /> Salvar</>}
+            </Button>
+            <Button
+              size="sm"
+              variant="default"
+              className="gap-1.5 bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={() => {
+                if (input) {
+                  sessionStorage.setItem("planejapro_exam_prefill", JSON.stringify({
+                    disciplina: input.disciplina,
+                    anoSerie: input.anoSerie,
+                    turma: input.turma,
+                    conteudo: toStr(planning?.tema) + " — " + toStr(planning?.versaoResumida),
+                  }));
+                }
+                navigate("/criar-prova");
+              }}
+            >
+              <FileQuestion className="h-4 w-4" />
+              Criar Prova
             </Button>
           </div>
         </div>
