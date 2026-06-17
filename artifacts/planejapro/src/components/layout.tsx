@@ -21,10 +21,10 @@ const NAV_MAIN = [
 ];
 
 const NAV_FERRAMENTAS = [
-  { href: "/atividades", label: "Gerador de Atividades", icon: ClipboardList },
-  { href: "/sequencia-didatica", label: "Sequência Didática", icon: BookMarked },
-  { href: "/adaptar", label: "Adaptação de Conteúdo", icon: Wand2 },
-  { href: "/relatorios", label: "Relatórios Pedagógicos", icon: FileText },
+  { href: "/atividades", label: "Gerador de Atividades", icon: ClipboardList, premium: true },
+  { href: "/sequencia-didatica", label: "Sequência Didática", icon: BookMarked, premium: true },
+  { href: "/adaptar", label: "Adaptação de Conteúdo", icon: Wand2, premium: true },
+  { href: "/relatorios", label: "Relatórios Pedagógicos", icon: FileText, premium: true },
   { href: "/banco-questoes", label: "Banco de Questões", icon: Database },
   { href: "/importar", label: "Importar Documento", icon: Upload },
 ];
@@ -111,7 +111,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       onClick={() => setIsMobileMenuOpen(false)}
                     >
                       <Icon className="h-4 w-4 flex-shrink-0" />
-                      <span>{item.label}</span>
+                      <span className="flex-1">{item.label}</span>
+                      {item.premium && (
+                        <span className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-1.5 py-0.5 rounded-full font-medium">
+                          PRO
+                        </span>
+                      )}
                     </div>
                   </Link>
                 );
