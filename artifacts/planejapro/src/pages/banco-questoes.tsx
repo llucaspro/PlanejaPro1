@@ -116,7 +116,7 @@ export default function BancoQuestoes() {
   return (
     <div className="max-w-3xl mx-auto">
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-        <Button variant="ghost" size="sm" className="mb-4 gap-1 -ml-2" onClick={() => navigate(-1 as never)}>
+        <Button variant="ghost" size="sm" className="mb-4 gap-1 -ml-2" onClick={() => window.history.length > 2 ? window.history.back() : navigate("/")}>
           <ArrowLeft className="h-4 w-4" /> Voltar
         </Button>
 

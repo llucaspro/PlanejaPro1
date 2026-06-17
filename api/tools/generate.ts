@@ -6,6 +6,8 @@ import { verifyToken, extractBearerToken } from "../_lib/auth";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
+const MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
+
 function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -19,6 +21,33 @@ function parseJson(raw: string): Record<string, unknown> | null {
   if (start !== -1 && end !== -1) raw = raw.slice(start, end + 1);
   raw = raw.replace(/,\s*([}\]])/g, "$1");
   try { return JSON.parse(raw); } catch { return null; }
+}
+
+function isOverloadedError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes("503") || msg.includes("overloaded") || msg.includes("unavailable") || msg.includes("high demand");
+}
+
+async function generateWithFallback(
+  prompt: string,
+  config: object,
+): Promise<string> {
+  let lastErr: unknown;
+  for (const model of MODELS) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config,
+      });
+      return response.text ?? "";
+    } catch (err) {
+      lastErr = err;
+      if (!isOverloadedError(err)) throw err;
+    }
+  }
+  throw lastErr;
 }
 
 async function handleActivities(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: object }> {
@@ -270,13 +299,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: promptData.prompt }] }],
-      config: promptData.config,
-    });
-
-    const raw = response.text ?? "";
+    const raw = await generateWithFallback(promptData.prompt, promptData.config);
     const result = parseJson(raw);
     if (!result) return res.status(500).json({ error: "IA retornou formato inválido. Tente novamente." });
 
@@ -298,7 +321,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Erro desconhecido";
-    return res.status(500).json({ error: "Falha ao processar: " + msg });
+    const isOverloaded = isOverloadedError(err);
+    const status = isOverloaded ? 503 : 500;
+    const message = isOverloaded
+      ? "O serviço de IA está com alta demanda. Aguarde alguns segundos e tente novamente."
+      : err instanceof Error ? err.message : "Erro desconhecido";
+    return res.status(status).json({ error: message });
   }
 }

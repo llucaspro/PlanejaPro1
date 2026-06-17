@@ -134,7 +134,13 @@ export default function Atividades() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ ...data, type: "activities" }),
       });
-      const json = await res.json() as Result & { error?: string };
+      const text = await res.text();
+      let json: Result & { error?: string };
+      try {
+        json = JSON.parse(text) as Result & { error?: string };
+      } catch {
+        throw new Error("Serviço temporariamente indisponível. Tente novamente em instantes.");
+      }
       if (!res.ok) throw new Error(json.error || "Erro ao gerar atividades");
       setResult(json);
       toast.success("Atividades geradas com sucesso!");
@@ -211,7 +217,7 @@ export default function Atividades() {
       {!isPremium && <PremiumOverlay tool="Gerador de Atividades" />}
       <div className={`max-w-2xl mx-auto ${!isPremium ? "blur-sm pointer-events-none select-none" : ""}`}>
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-        <Button variant="ghost" size="sm" className="mb-4 gap-1 -ml-2" onClick={() => navigate(-1 as never)}>
+        <Button variant="ghost" size="sm" className="mb-4 gap-1 -ml-2" onClick={() => window.history.length > 2 ? window.history.back() : navigate("/")}>
           <ArrowLeft className="h-4 w-4" /> Voltar
         </Button>
 
