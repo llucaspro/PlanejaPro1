@@ -19,6 +19,8 @@ import Login from "@/pages/login";
 import Cadastro from "@/pages/cadastro";
 import Upgrade from "@/pages/upgrade";
 import Admin from "@/pages/admin";
+import CriarProva from "@/pages/criar-prova";
+import ProvaResultado from "@/pages/prova-resultado";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -84,6 +86,8 @@ function AppRoutes() {
           <Route path="/assistente" component={Assistente} />
           <Route path="/importar" component={Importar} />
           <Route path="/configuracoes" component={Configuracoes} />
+          <Route path="/criar-prova" component={CriarProva} />
+          <Route path="/prova-resultado" component={ProvaResultado} />
           {user.isAdmin && <Route path="/admin" component={Admin} />}
           <Route path="/login">
             <Redirect to="/" />
