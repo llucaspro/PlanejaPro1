@@ -5,11 +5,17 @@ import path from "path";
 
 const isReplit = process.env.REPL_ID !== undefined;
 const isProduction = process.env.NODE_ENV === "production";
+const isVercel = process.env.VERCEL === "1";
 
-// In Vercel/CI builds, PORT and BASE_PATH may not be set — use safe defaults
 const rawPort = process.env.PORT;
 const port = rawPort ? Number(rawPort) : 3000;
 const basePath = process.env.BASE_PATH ?? "/";
+
+// On Vercel: output 2 levels up from artifacts/planejapro/ → project root /dist
+// On Replit: output to artifacts/planejapro/dist/public (standard)
+const outDir = isVercel
+  ? path.resolve(import.meta.dirname, "../../dist")
+  : path.resolve(import.meta.dirname, "dist/public");
 
 export default defineConfig(async () => {
   const plugins = [react(), tailwindcss()];
@@ -39,7 +45,7 @@ export default defineConfig(async () => {
     },
     root: path.resolve(import.meta.dirname),
     build: {
-      outDir: path.resolve(import.meta.dirname, "dist/public"),
+      outDir,
       emptyOutDir: true,
     },
     server: {
