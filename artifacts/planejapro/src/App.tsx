@@ -17,6 +17,8 @@ import Importar from "@/pages/importar";
 import Configuracoes from "@/pages/configuracoes";
 import Login from "@/pages/login";
 import Cadastro from "@/pages/cadastro";
+import Upgrade from "@/pages/upgrade";
+import Admin from "@/pages/admin";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -55,6 +57,22 @@ function AppRoutes() {
     );
   }
 
+  const isBlocked = !user.isPremium && user.freeGenerationsRemaining <= 0;
+
+  if (isBlocked) {
+    return (
+      <Switch>
+        <Route path="/upgrade" component={Upgrade} />
+        <Route path="/login">
+          <Redirect to="/upgrade" />
+        </Route>
+        <Route>
+          <Redirect to="/upgrade" />
+        </Route>
+      </Switch>
+    );
+  }
+
   return (
     <Layout>
       <AnimatePresence mode="wait">
@@ -66,10 +84,14 @@ function AppRoutes() {
           <Route path="/assistente" component={Assistente} />
           <Route path="/importar" component={Importar} />
           <Route path="/configuracoes" component={Configuracoes} />
+          {user.isAdmin && <Route path="/admin" component={Admin} />}
           <Route path="/login">
             <Redirect to="/" />
           </Route>
           <Route path="/cadastro">
+            <Redirect to="/" />
+          </Route>
+          <Route path="/upgrade">
             <Redirect to="/" />
           </Route>
           <Route component={NotFound} />

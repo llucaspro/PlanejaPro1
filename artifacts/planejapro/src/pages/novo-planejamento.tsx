@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useGeneratePlanning } from "@workspace/api-client-react";
 import type { GeneratedPlanning } from "@workspace/api-client-react";
+import { useAuth } from "@/contexts/auth-context";
 
 const PERFIS_TURMA = [
   { id: "participativa", label: "Participativa" },
@@ -56,6 +57,7 @@ type FormData = z.infer<typeof schema>;
 
 export default function NovoPlanejamento() {
   const [, navigate] = useLocation();
+  const { refreshUser } = useAuth();
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -75,9 +77,23 @@ export default function NovoPlanejamento() {
       onSuccess: (data: GeneratedPlanning) => {
         sessionStorage.setItem("planejapro_result", JSON.stringify(data));
         sessionStorage.setItem("planejapro_input", JSON.stringify(watch()));
+        refreshUser();
         navigate("/resultado");
       },
       onError: (error: unknown) => {
+        const apiError = error as { status?: number; data?: { code?: string; error?: string } };
+        if (apiError?.status === 403) {
+          if (apiError?.data?.code === "FREE_LIMIT_REACHED") {
+            navigate("/upgrade");
+            return;
+          }
+          toast.error("Acesso negado", { description: apiError?.data?.error || "Tente novamente." });
+          return;
+        }
+        if (apiError?.status === 401) {
+          toast.error("Sessão expirada", { description: "Faça login novamente." });
+          return;
+        }
         const msg = error instanceof Error ? error.message : "Tente novamente em instantes.";
         toast.error("Erro ao gerar planejamento", { description: msg });
       },
@@ -107,7 +123,6 @@ export default function NovoPlanejamento() {
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          {/* Dados básicos */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Dados da aula</CardTitle>
@@ -118,68 +133,45 @@ export default function NovoPlanejamento() {
                   <Label htmlFor="disciplina">Disciplina *</Label>
                   <Input
                     id="disciplina"
-                    placeholder="Ex: Matemática, Biologia..."
+                    placeholder="Ex: Matemática, Português..."
                     {...register("disciplina")}
                   />
-                  {errors.disciplina && (
-                    <p className="text-sm text-destructive">{errors.disciplina.message}</p>
-                  )}
+                  {errors.disciplina && <p className="text-xs text-destructive">{errors.disciplina.message}</p>}
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label>Ano / Série *</Label>
-                  <Select onValueChange={(val) => setValue("anoSerie", val)}>
+                  <Label>Ano/Série *</Label>
+                  <Select onValueChange={(v) => setValue("anoSerie", v)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecionar..." />
+                      <SelectValue placeholder="Selecione..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {ANOS.map(ano => (
+                      {ANOS.map((ano) => (
                         <SelectItem key={ano} value={ano}>{ano}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {errors.anoSerie && (
-                    <p className="text-sm text-destructive">{errors.anoSerie.message}</p>
-                  )}
+                  {errors.anoSerie && <p className="text-xs text-destructive">{errors.anoSerie.message}</p>}
                 </div>
+              </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="turma">Turma</Label>
-                  <Input id="turma" placeholder="Ex: A, B, 101..." {...register("turma")} />
+                  <Input id="turma" placeholder="Ex: 7A, Turma 3..." {...register("turma")} />
                 </div>
-
                 <div className="space-y-1.5">
-                  <Label htmlFor="quantidadeAulas">Quantidade de aulas *</Label>
-                  <Input
-                    id="quantidadeAulas"
-                    type="number"
-                    min={1}
-                    max={50}
-                    {...register("quantidadeAulas")}
-                  />
+                  <Label htmlFor="quantidadeAulas">Nº de aulas *</Label>
+                  <Input id="quantidadeAulas" type="number" min={1} max={50} {...register("quantidadeAulas")} />
                 </div>
-
                 <div className="space-y-1.5">
-                  <Label htmlFor="duracaoAula">Duração de cada aula (min) *</Label>
-                  <Select
-                    onValueChange={(val) => setValue("duracaoAula", parseInt(val))}
-                    defaultValue="50"
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[30, 40, 45, 50, 60, 90, 100, 120].map(d => (
-                        <SelectItem key={d} value={String(d)}>{d} minutos</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="duracaoAula">Duração (min) *</Label>
+                  <Input id="duracaoAula" type="number" min={30} max={240} {...register("duracaoAula")} />
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Conteúdo */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Conteúdo e objetivos</CardTitle>
@@ -189,20 +181,17 @@ export default function NovoPlanejamento() {
                 <Label htmlFor="conteudo">Conteúdo a ser trabalhado *</Label>
                 <Textarea
                   id="conteudo"
-                  placeholder="Ex: Equações do 2º grau, resolução por fórmula de Bhaskara..."
+                  placeholder="Ex: Frações: conceito, tipos e operações básicas..."
                   rows={3}
                   {...register("conteudo")}
                 />
-                {errors.conteudo && (
-                  <p className="text-sm text-destructive">{errors.conteudo.message}</p>
-                )}
+                {errors.conteudo && <p className="text-xs text-destructive">{errors.conteudo.message}</p>}
               </div>
-
               <div className="space-y-1.5">
-                <Label htmlFor="objetivos">Objetivos desejados (opcional)</Label>
+                <Label htmlFor="objetivos">Objetivos do professor (opcional)</Label>
                 <Textarea
                   id="objetivos"
-                  placeholder="Ex: Que os alunos consigam resolver equações e identificar quando aplicar..."
+                  placeholder="O que você quer que os alunos aprendam ao final das aulas?"
                   rows={2}
                   {...register("objetivos")}
                 />
@@ -210,22 +199,19 @@ export default function NovoPlanejamento() {
             </CardContent>
           </Card>
 
-          {/* Perfil da turma */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Perfil da turma</CardTitle>
               <CardDescription>Selecione as características que melhor descrevem sua turma</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 {PERFIS_TURMA.map((perfil) => (
-                  <div key={perfil.id} className="flex items-center gap-2">
+                  <div key={perfil.id} className="flex items-center space-x-2">
                     <Checkbox
                       id={`perfil-${perfil.id}`}
                       checked={perfilTurma.includes(perfil.id)}
-                      onCheckedChange={() =>
-                        toggleArray(perfilTurma, perfil.id, (v) => setValue("perfilTurma", v))
-                      }
+                      onCheckedChange={() => toggleArray(perfilTurma, perfil.id, (v) => setValue("perfilTurma", v))}
                     />
                     <Label htmlFor={`perfil-${perfil.id}`} className="font-normal cursor-pointer">
                       {perfil.label}
@@ -236,22 +222,18 @@ export default function NovoPlanejamento() {
             </CardContent>
           </Card>
 
-          {/* Recursos */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Recursos disponíveis</CardTitle>
-              <CardDescription>Quais recursos você tem na escola</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 {RECURSOS.map((recurso) => (
-                  <div key={recurso.id} className="flex items-center gap-2">
+                  <div key={recurso.id} className="flex items-center space-x-2">
                     <Checkbox
                       id={`recurso-${recurso.id}`}
                       checked={recursosDisponiveis.includes(recurso.id)}
-                      onCheckedChange={() =>
-                        toggleArray(recursosDisponiveis, recurso.id, (v) => setValue("recursosDisponiveis", v))
-                      }
+                      onCheckedChange={() => toggleArray(recursosDisponiveis, recurso.id, (v) => setValue("recursosDisponiveis", v))}
                     />
                     <Label htmlFor={`recurso-${recurso.id}`} className="font-normal cursor-pointer">
                       {recurso.label}
@@ -262,7 +244,6 @@ export default function NovoPlanejamento() {
             </CardContent>
           </Card>
 
-          {/* Observações */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Observações adicionais</CardTitle>

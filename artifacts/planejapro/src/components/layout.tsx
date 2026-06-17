@@ -1,18 +1,12 @@
 import { Link, useLocation } from "wouter";
 import {
-  BookOpen,
-  PlusCircle,
-  FolderOpen,
-  MessageSquare,
-  Upload,
-  Settings,
-  Menu,
-  X,
-  LogOut,
+  BookOpen, PlusCircle, FolderOpen, MessageSquare,
+  Upload, Settings, Menu, X, LogOut, Shield, Sparkles,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "./ui/sheet";
+import { Badge } from "./ui/badge";
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "sonner";
 
@@ -38,7 +32,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const displayName = user?.displayName || user?.email?.split("@")[0] || "Professor";
+  const displayName = user?.name || user?.email?.split("@")[0] || "Professor";
   const initials = displayName.slice(0, 2).toUpperCase();
 
   const NavLinks = () => (
@@ -63,9 +57,50 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </Link>
           );
         })}
+
+        {user?.isAdmin && (
+          <Link href="/admin">
+            <div
+              className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer ${
+                location === "/admin"
+                  ? "bg-primary text-primary-foreground font-medium"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              }`}
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              <Shield className="h-5 w-5" />
+              <span>Admin</span>
+            </div>
+          </Link>
+        )}
       </div>
 
       <div className="py-4 space-y-1 border-t">
+        {user && !user.isPremium && (
+          <div className="px-3 py-2 mb-1">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-muted-foreground">Gerações gratuitas</span>
+              <Badge variant={user.freeGenerationsRemaining > 0 ? "secondary" : "destructive"} className="text-xs">
+                {user.freeGenerationsRemaining}/3
+              </Badge>
+            </div>
+            <div className="w-full bg-muted rounded-full h-1.5">
+              <div
+                className="bg-primary h-1.5 rounded-full transition-all"
+                style={{ width: `${(user.freeGenerationsRemaining / 3) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {user?.isPremium && (
+          <div className="px-3 py-1.5 mb-1">
+            <Badge className="bg-amber-100 text-amber-800 text-xs gap-1">
+              <Sparkles className="h-3 w-3" /> Premium ativo
+            </Badge>
+          </div>
+        )}
+
         <Link href="/configuracoes">
           <div
             className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer ${
@@ -99,7 +134,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-[100dvh] w-full bg-background">
-      {/* Desktop Sidebar */}
       <aside className="hidden md:flex flex-col w-64 border-r bg-card px-4 py-6">
         <div className="flex items-center gap-2 px-2 mb-6">
           <BookOpen className="h-6 w-6 text-primary" />
@@ -108,7 +142,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <NavLinks />
       </aside>
 
-      {/* Mobile Header & Content */}
       <div className="flex flex-col flex-1 min-w-0">
         <header className="md:hidden flex items-center justify-between border-b bg-card px-4 py-3">
           <div className="flex items-center gap-2">
