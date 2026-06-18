@@ -78,14 +78,44 @@ function stripMarkdown(text: string): string {
     .trim();
 }
 
+function renderFrac(num: string, den: string, key: number | string) {
+  return (
+    <span
+      key={key}
+      className="inline-flex flex-col items-center mx-0.5"
+      style={{ verticalAlign: "middle", fontSize: "0.82em", lineHeight: 1 }}
+    >
+      <span style={{ borderBottom: "1.5px solid currentColor", paddingInline: "2px", display: "block", textAlign: "center" }}>{num}</span>
+      <span style={{ paddingInline: "2px", display: "block", textAlign: "center" }}>{den}</span>
+    </span>
+  );
+}
+
+function withFracs(str: string) {
+  const reg = /\b(\d+)\/(\d+)\b/g;
+  const nodes: (string | JSX.Element)[] = [];
+  let last = 0;
+  let ki = 0;
+  let m: RegExpExecArray | null;
+  while ((m = reg.exec(str)) !== null) {
+    if (m.index > last) nodes.push(str.slice(last, m.index));
+    nodes.push(renderFrac(m[1], m[2], ki++));
+    last = m.index + m[0].length;
+  }
+  if (last < str.length) nodes.push(str.slice(last));
+  if (nodes.length === 0) return str;
+  if (nodes.length === 1 && typeof nodes[0] === "string") return nodes[0];
+  return <>{nodes}</>;
+}
+
 function RenderText({ text, className }: { text: string; className?: string }) {
   const parts = text.split(/\*\*([^*]+)\*\*/g);
   return (
     <span className={className}>
-      {parts.map((part, i) =>
+      {parts.map((p, i) =>
         i % 2 === 1
-          ? <strong key={i}>{part}</strong>
-          : <span key={i}>{part}</span>
+          ? <strong key={i}>{withFracs(p)}</strong>
+          : <span key={i}>{withFracs(p)}</span>
       )}
     </span>
   );
@@ -96,34 +126,139 @@ function RenderText({ text, className }: { text: string; className?: string }) {
 function handlePDFSimples(result: Result) {
   import("jspdf").then(({ default: jsPDF }) => {
     const doc = new jsPDF();
-    const pageW = doc.internal.pageSize.getWidth();
-    const margin = 15;
-    const maxW = pageW - margin * 2;
-    let y = 20;
+    const PW = doc.internal.pageSize.getWidth();
+    const PH = doc.internal.pageSize.getHeight();
+    const M = 15;
+    const CW = PW - M * 2;
+    const BOTTOM = PH - 12;
+    let y = 18;
 
-    const addText = (text: string, size = 11, bold = false) => {
-      const clean = stripMarkdown(text);
-      doc.setFontSize(size);
-      doc.setFont("helvetica", bold ? "bold" : "normal");
-      const lines = doc.splitTextToSize(clean, maxW);
-      if (y + lines.length * (size * 0.4) > 280) { doc.addPage(); y = 20; }
-      doc.text(lines, margin, y);
-      y += lines.length * (size * 0.4) + 3;
-    };
+    const C_BLACK: [number, number, number] = [0, 0, 0];
+    const C_GRAY: [number, number, number] = [90, 90, 90];
+    const C_LINE: [number, number, number] = [190, 190, 190];
 
-    addText(result.titulo, 16, true);
-    y += 2;
-    addText(result.descricao, 10);
-    y += 4;
+    function chk(need: number) {
+      if (y + need > BOTTOM) { doc.addPage(); y = 18; }
+    }
 
-    result.atividades.forEach((a, i) => {
-      if (y > 240) { doc.addPage(); y = 20; }
-      addText(`Atividade ${i + 1}: ${a.titulo}`, 13, true);
-      addText(a.enunciado, 10);
-      if (a.instrucoes) addText(`Instruções: ${a.instrucoes}`, 10);
-      if (a.tempoEstimado) addText(`Tempo estimado: ${a.tempoEstimado}`, 10);
-      if (a.materiais?.length) addText(`Materiais: ${a.materiais.join(", ")}`, 10);
-      y += 4;
+    function drawFracS(num: string, den: string, cx: number, cy: number, fs: number): number {
+      const ss = Math.max(6, fs * 0.68);
+      doc.setFontSize(ss);
+      const nw = doc.getTextWidth(num);
+      const dw = doc.getTextWidth(den);
+      const fw = Math.max(nw, dw) + 1.5;
+      doc.text(num, cx + (fw - nw) / 2, cy - 2.2);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.25);
+      doc.line(cx + 0.3, cy - 0.5, cx + fw - 0.3, cy - 0.5);
+      doc.text(den, cx + (fw - dw) / 2, cy + 2.7);
+      doc.setFontSize(fs);
+      return fw + 0.5;
+    }
+
+    function drawLF(text: string, lx: number, ly: number, fs: number): void {
+      const reg = /\b(\d+)\/(\d+)\b/g;
+      let last = 0;
+      let cx = lx;
+      doc.setFontSize(fs);
+      let m: RegExpExecArray | null;
+      while ((m = reg.exec(text)) !== null) {
+        const before = text.slice(last, m.index);
+        if (before) { doc.text(before, cx, ly); cx += doc.getTextWidth(before); }
+        cx += drawFracS(m[1], m[2], cx, ly, fs);
+        last = m.index + m[0].length;
+        doc.setFontSize(fs);
+      }
+      const rest = text.slice(last);
+      if (rest) { doc.setFontSize(fs); doc.text(rest, cx, ly); }
+    }
+
+    // ── Cabeçalho ─────────────────────────────────────────────────────────────
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(...C_BLACK);
+    const tlines = doc.splitTextToSize(stripMarkdown(result.titulo), CW) as string[];
+    for (const tl of tlines) { chk(8); doc.text(tl, M, y); y += 7; }
+
+    doc.setDrawColor(...C_LINE);
+    doc.setLineWidth(0.5);
+    doc.line(M, y, PW - M, y);
+    y += 5;
+
+    if (result.descricao) {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...C_GRAY);
+      const dlines = doc.splitTextToSize(stripMarkdown(result.descricao), CW) as string[];
+      for (const dl of dlines) { chk(5); doc.text(dl, M, y); y += 5; }
+      y += 3;
+    }
+
+    // ── Atividades ────────────────────────────────────────────────────────────
+    result.atividades.forEach((a, idx) => {
+      chk(22);
+
+      // Número + Título
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(...C_BLACK);
+      const lbl = `${idx + 1}.  ${stripMarkdown(a.titulo)}`;
+      const lblLines = doc.splitTextToSize(lbl, CW) as string[];
+      for (const ll of lblLines) { chk(6); doc.text(ll, M, y); y += 6; }
+      y += 1;
+
+      // Enunciado
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(...C_BLACK);
+      const eclean = stripMarkdown(a.enunciado);
+      const elines = doc.splitTextToSize(eclean, CW - 6) as string[];
+      for (const el of elines) {
+        chk(5);
+        drawLF(el, M + 4, y, 10);
+        y += 5;
+      }
+      y += 2;
+
+      // Instruções
+      if (a.instrucoes) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...C_GRAY);
+        chk(5);
+        doc.text("Instruções:", M + 4, y);
+        y += 4.5;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9.5);
+        doc.setTextColor(...C_BLACK);
+        const ilines = doc.splitTextToSize(stripMarkdown(a.instrucoes), CW - 10) as string[];
+        for (const il of ilines) {
+          chk(5);
+          drawLF(il, M + 8, y, 9.5);
+          y += 5;
+        }
+        y += 1;
+      }
+
+      // Tempo e Materiais
+      const meta: string[] = [];
+      if (a.tempoEstimado) meta.push(`Tempo: ${stripMarkdown(a.tempoEstimado)}`);
+      if (a.materiais?.length) meta.push(`Materiais: ${a.materiais.map(m => stripMarkdown(m)).join(", ")}`);
+      if (meta.length) {
+        chk(5);
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8.5);
+        doc.setTextColor(...C_GRAY);
+        const mlines = doc.splitTextToSize(meta.join("  ·  "), CW - 4) as string[];
+        for (const ml of mlines) { chk(4.5); doc.text(ml, M + 4, y); y += 4.5; }
+        y += 1;
+      }
+
+      // Separador
+      doc.setDrawColor(...C_LINE);
+      doc.setLineWidth(0.3);
+      doc.line(M, y + 2, PW - M, y + 2);
+      y += 8;
     });
 
     doc.save(`atividades-${Date.now()}.pdf`);
@@ -191,6 +326,56 @@ async function handlePDFDecorado(result: Result, formData: Partial<FormData>) {
       y += lineH;
     }
     return lines.length * lineH;
+  }
+
+  function drawFracD(
+    num: string, den: string,
+    cx: number, cy: number,
+    fs: number,
+    color: [number, number, number]
+  ): number {
+    const ss = Math.max(6.5, fs * 0.68);
+    doc.setFontSize(ss);
+    doc.setTextColor(...color);
+    const nw = doc.getTextWidth(num);
+    const dw = doc.getTextWidth(den);
+    const fw = Math.max(nw, dw) + 2;
+    doc.text(num, cx + (fw - nw) / 2, cy - 2.2);
+    doc.setDrawColor(...color);
+    doc.setLineWidth(0.28);
+    doc.line(cx + 0.3, cy - 0.5, cx + fw - 0.3, cy - 0.5);
+    doc.text(den, cx + (fw - dw) / 2, cy + 2.7);
+    doc.setFontSize(fs);
+    return fw + 0.5;
+  }
+
+  function drawLFD(
+    text: string,
+    lx: number, ly: number,
+    fs: number,
+    color: [number, number, number]
+  ): void {
+    const reg = /\b(\d+)\/(\d+)\b/g;
+    let last = 0;
+    let cx = lx;
+    doc.setFontSize(fs);
+    doc.setTextColor(...color);
+    let m: RegExpExecArray | null;
+    while ((m = reg.exec(text)) !== null) {
+      const before = text.slice(last, m.index);
+      if (before) {
+        doc.setFontSize(fs); doc.setTextColor(...color);
+        doc.text(before, cx, ly);
+        cx += doc.getTextWidth(before);
+      }
+      cx += drawFracD(m[1], m[2], cx, ly, fs, color);
+      last = m.index + m[0].length;
+    }
+    const rest = text.slice(last);
+    if (rest) {
+      doc.setFontSize(fs); doc.setTextColor(...color);
+      doc.text(rest, cx, ly);
+    }
   }
 
   // ── Header ──────────────────────────────────────────────────────────────────
@@ -287,8 +472,9 @@ async function handlePDFDecorado(result: Result, formData: Partial<FormData>) {
       doc.setFillColor(...C_BG);
       doc.rect(MARGIN, y, CW, enuncH, "F");
       doc.setTextColor(...C_DARK);
+      doc.setFont("helvetica", "normal");
       for (let li = 0; li < lines.length; li++) {
-        doc.text(lines[li], MARGIN + 5, y + 7 + li * 6);
+        drawLFD(lines[li], MARGIN + 5, y + 7 + li * 6, 10, C_DARK);
       }
       y += enuncH + 4;
     }
@@ -314,8 +500,9 @@ async function handlePDFDecorado(result: Result, formData: Partial<FormData>) {
       doc.text("INSTRUÇÕES:", MARGIN + 7, y + 6);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
+      const instrColor: [number, number, number] = [113, 63, 18];
       for (let li = 0; li < lines.length; li++) {
-        doc.text(lines[li], MARGIN + 7, y + 11 + li * 5.5);
+        drawLFD(lines[li], MARGIN + 7, y + 11 + li * 5.5, 9, instrColor);
       }
       y += instrH + 3;
     }
