@@ -4,10 +4,24 @@ export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
 
-function isOverloadedError(err: unknown): boolean {
+function isRetryableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
-  return msg.includes("503") || msg.includes("overloaded") || msg.includes("unavailable") || msg.includes("high demand");
+  return (
+    msg.includes("503") ||
+    msg.includes("overloaded") ||
+    msg.includes("unavailable") ||
+    msg.includes("high demand") ||
+    msg.includes("429") ||
+    msg.includes("rate limit") ||
+    msg.includes("rate_limit") ||
+    msg.includes("quota") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("too many requests") ||
+    msg.includes("500") ||
+    msg.includes("internal server error") ||
+    msg.includes("service unavailable")
+  );
 }
 
 export async function generateWithFallback(
@@ -31,12 +45,12 @@ export async function generateWithFallback(
       return response.text ?? "";
     } catch (err) {
       lastErr = err;
-      if (!isOverloadedError(err)) throw err;
+      if (!isRetryableError(err)) throw err;
     }
   }
   throw lastErr;
 }
 
 export function isOverloadedError2(err: unknown): boolean {
-  return isOverloadedError(err);
+  return isRetryableError(err);
 }
