@@ -7,18 +7,18 @@ import { toast } from "sonner";
 import {
   Loader2, ClipboardList, ChevronRight, ArrowLeft, Download,
   Copy, CheckCircle, Clock, BookOpen, Users, Lightbulb, Lock,
+  LayoutList, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/auth-context";
-import jsPDF from "jspdf";
 
 const ANOS = [
   "1º Ano EF", "2º Ano EF", "3º Ano EF", "4º Ano EF", "5º Ano EF",
@@ -69,6 +69,293 @@ interface Result {
   _meta: { dificuldade: string; tipo: string };
 }
 
+// ── Markdown helpers ──────────────────────────────────────────────────────────
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .trim();
+}
+
+function RenderText({ text, className }: { text: string; className?: string }) {
+  const parts = text.split(/\*\*([^*]+)\*\*/g);
+  return (
+    <span className={className}>
+      {parts.map((part, i) =>
+        i % 2 === 1
+          ? <strong key={i}>{part}</strong>
+          : <span key={i}>{part}</span>
+      )}
+    </span>
+  );
+}
+
+// ── PDF — Simples ─────────────────────────────────────────────────────────────
+
+function handlePDFSimples(result: Result) {
+  import("jspdf").then(({ default: jsPDF }) => {
+    const doc = new jsPDF();
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const maxW = pageW - margin * 2;
+    let y = 20;
+
+    const addText = (text: string, size = 11, bold = false) => {
+      const clean = stripMarkdown(text);
+      doc.setFontSize(size);
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      const lines = doc.splitTextToSize(clean, maxW);
+      if (y + lines.length * (size * 0.4) > 280) { doc.addPage(); y = 20; }
+      doc.text(lines, margin, y);
+      y += lines.length * (size * 0.4) + 3;
+    };
+
+    addText(result.titulo, 16, true);
+    y += 2;
+    addText(result.descricao, 10);
+    y += 4;
+
+    result.atividades.forEach((a, i) => {
+      if (y > 240) { doc.addPage(); y = 20; }
+      addText(`Atividade ${i + 1}: ${a.titulo}`, 13, true);
+      addText(a.enunciado, 10);
+      if (a.instrucoes) addText(`Instruções: ${a.instrucoes}`, 10);
+      if (a.tempoEstimado) addText(`Tempo estimado: ${a.tempoEstimado}`, 10);
+      if (a.materiais?.length) addText(`Materiais: ${a.materiais.join(", ")}`, 10);
+      y += 4;
+    });
+
+    doc.save(`atividades-${Date.now()}.pdf`);
+    toast.success("PDF baixado!");
+  });
+}
+
+// ── PDF — Decorado ─────────────────────────────────────────────────────────────
+
+async function handlePDFDecorado(result: Result, formData: Partial<FormData>) {
+  const { default: jsPDF } = await import("jspdf");
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  const PW = 210;
+  const PH = 297;
+  const MARGIN = 18;
+  const CW = PW - MARGIN * 2;
+  const FOOTER_H = 10;
+  const CONTENT_BOTTOM = PH - FOOTER_H - 6;
+
+  const C_BLUE: [number, number, number] = [37, 99, 235];
+  const C_BLUE_LIGHT: [number, number, number] = [219, 234, 254];
+  const C_DARK: [number, number, number] = [17, 24, 39];
+  const C_GRAY: [number, number, number] = [100, 116, 139];
+  const C_WHITE: [number, number, number] = [255, 255, 255];
+  const C_BG: [number, number, number] = [248, 250, 252];
+  const C_LINE: [number, number, number] = [203, 213, 225];
+
+  let y = 0;
+  let pageNum = 1;
+
+  function drawFooter() {
+    const fy = PH - FOOTER_H;
+    doc.setFillColor(...C_BLUE);
+    doc.rect(0, fy, PW, FOOTER_H, "F");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(...C_WHITE);
+    doc.text("Gerado por PlanejaPro", MARGIN, fy + 6.5);
+    doc.text(`Página ${pageNum}`, PW - MARGIN, fy + 6.5, { align: "right" });
+  }
+
+  function newPage() {
+    drawFooter();
+    doc.addPage();
+    pageNum++;
+    y = MARGIN + 4;
+  }
+
+  function checkSpace(needed: number) {
+    if (y + needed > CONTENT_BOTTOM) newPage();
+  }
+
+  function renderLines(text: string, fontSize: number, bold: boolean,
+    color: [number, number, number], x: number, maxW: number, lineH: number) {
+    const clean = stripMarkdown(text);
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(fontSize);
+    doc.setTextColor(...color);
+    const lines = doc.splitTextToSize(clean, maxW) as string[];
+    for (const line of lines) {
+      checkSpace(lineH + 1);
+      doc.text(line, x, y);
+      y += lineH;
+    }
+    return lines.length * lineH;
+  }
+
+  // ── Header ──────────────────────────────────────────────────────────────────
+  const titleLines = doc.splitTextToSize(stripMarkdown(result.titulo), CW - 10) as string[];
+  const headerH = 18 + titleLines.length * 7;
+
+  doc.setFillColor(...C_BLUE);
+  doc.rect(0, 0, PW, headerH, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...C_WHITE);
+  doc.text("PlanejaPro", MARGIN, 10);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  const dateStr = new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+  doc.text(dateStr, PW - MARGIN, 10, { align: "right" });
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(...C_WHITE);
+  for (let i = 0; i < titleLines.length; i++) {
+    doc.text(titleLines[i], MARGIN, 18 + i * 7);
+  }
+
+  y = headerH + 4;
+
+  // ── Info grid ───────────────────────────────────────────────────────────────
+  const infoH = 16;
+  doc.setFillColor(...C_BG);
+  doc.rect(MARGIN, y, CW, infoH, "F");
+  doc.setDrawColor(...C_BLUE_LIGHT);
+  doc.setLineWidth(0.3);
+  doc.rect(MARGIN, y, CW, infoH);
+
+  const col1x = MARGIN + 4;
+  const col2x = MARGIN + CW / 3 + 4;
+  const col3x = MARGIN + (CW / 3) * 2 + 4;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(...C_GRAY);
+  doc.text("DISCIPLINA", col1x, y + 5);
+  doc.text("ANO/SÉRIE", col2x, y + 5);
+  doc.text("TIPO", col3x, y + 5);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...C_DARK);
+  doc.text(formData.disciplina || "—", col1x, y + 12);
+  doc.text(formData.anoSerie || "—", col2x, y + 12);
+  const tipoLabel = TIPOS.find(t => t.value === formData.tipo)?.label || "—";
+  doc.text(tipoLabel, col3x, y + 12);
+
+  y += infoH + 6;
+
+  // ── Description ─────────────────────────────────────────────────────────────
+  {
+    const clean = stripMarkdown(result.descricao);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...C_GRAY);
+    const lines = doc.splitTextToSize(clean, CW) as string[];
+    for (const line of lines) {
+      checkSpace(6);
+      doc.text(line, MARGIN, y);
+      y += 5.5;
+    }
+    y += 4;
+  }
+
+  // ── Activities ──────────────────────────────────────────────────────────────
+  for (const a of result.atividades) {
+    checkSpace(20);
+
+    // Section banner
+    doc.setFillColor(...C_BLUE);
+    doc.rect(MARGIN, y, CW, 9, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...C_WHITE);
+    doc.text(`ATIVIDADE ${a.numero}: ${stripMarkdown(a.titulo).toUpperCase()}`, MARGIN + 5, y + 6.2);
+    y += 12;
+
+    // Enunciado
+    {
+      const clean = stripMarkdown(a.enunciado);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      const lines = doc.splitTextToSize(clean, CW - 10) as string[];
+      const enuncH = lines.length * 6 + 10;
+      checkSpace(enuncH);
+      doc.setFillColor(...C_BG);
+      doc.rect(MARGIN, y, CW, enuncH, "F");
+      doc.setTextColor(...C_DARK);
+      for (let li = 0; li < lines.length; li++) {
+        doc.text(lines[li], MARGIN + 5, y + 7 + li * 6);
+      }
+      y += enuncH + 4;
+    }
+
+    // Instructions box (yellow)
+    if (a.instrucoes) {
+      const clean = stripMarkdown(a.instrucoes);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      const lines = doc.splitTextToSize(clean, CW - 16) as string[];
+      const instrH = lines.length * 5.5 + 10;
+      checkSpace(instrH);
+      doc.setFillColor(254, 252, 232);
+      doc.rect(MARGIN, y, CW, instrH, "F");
+      doc.setDrawColor(253, 224, 71);
+      doc.setLineWidth(0.3);
+      doc.rect(MARGIN, y, CW, instrH);
+      doc.setFillColor(234, 179, 8);
+      doc.rect(MARGIN, y, 3, instrH, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(113, 63, 18);
+      doc.text("INSTRUÇÕES:", MARGIN + 7, y + 6);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      for (let li = 0; li < lines.length; li++) {
+        doc.text(lines[li], MARGIN + 7, y + 11 + li * 5.5);
+      }
+      y += instrH + 3;
+    }
+
+    // Meta row (time, materials, objective)
+    const metaItems: string[] = [];
+    if (a.tempoEstimado) metaItems.push(`⏱ ${stripMarkdown(a.tempoEstimado)}`);
+    if (a.materiais?.length) metaItems.push(`📚 ${a.materiais.map(m => stripMarkdown(m)).join(", ")}`);
+    if (a.objetivoPedagogico) metaItems.push(`🎯 ${stripMarkdown(a.objetivoPedagogico)}`);
+
+    if (metaItems.length > 0) {
+      checkSpace(8);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(...C_GRAY);
+      const metaText = metaItems.join("   ·   ");
+      const metaLines = doc.splitTextToSize(metaText, CW) as string[];
+      for (const ml of metaLines) {
+        checkSpace(6);
+        doc.text(ml, MARGIN, y);
+        y += 5.5;
+      }
+    }
+
+    // Divider
+    doc.setDrawColor(...C_LINE);
+    doc.setLineWidth(0.2);
+    doc.line(MARGIN, y + 3, PW - MARGIN, y + 3);
+    y += 10;
+  }
+
+  drawFooter();
+
+  doc.save(`atividades-decorado-${Date.now()}.pdf`);
+}
+
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+
 function SkeletonCard() {
   return (
     <Card>
@@ -109,13 +396,17 @@ function PremiumOverlay({ tool }: { tool: string }) {
   );
 }
 
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function Atividades() {
   const [, navigate] = useLocation();
   const { token, user } = useAuth();
   const isPremium = user?.isPremium ?? false;
   const [result, setResult] = useState<Result | null>(null);
+  const [formSnapshot, setFormSnapshot] = useState<Partial<FormData>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [pdfEstilo, setPdfEstilo] = useState<"simples" | "decorado">("decorado");
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -128,6 +419,7 @@ export default function Atividades() {
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);
     setResult(null);
+    setFormSnapshot(data);
     try {
       const res = await fetch("/api/tools/generate", {
         method: "POST",
@@ -154,56 +446,34 @@ export default function Atividades() {
   const handleCopy = () => {
     if (!result) return;
     const text = result.atividades.map((a, i) =>
-      `Atividade ${i + 1}: ${a.titulo}\n${a.enunciado}\n\nInstruções: ${a.instrucoes}\nTempo: ${a.tempoEstimado}\n`
+      `Atividade ${i + 1}: ${stripMarkdown(a.titulo)}\n${stripMarkdown(a.enunciado)}\n\nInstruções: ${stripMarkdown(a.instrucoes)}\nTempo: ${a.tempoEstimado}\n`
     ).join("\n---\n");
-    navigator.clipboard.writeText(`${result.titulo}\n\n${text}`);
+    navigator.clipboard.writeText(`${stripMarkdown(result.titulo)}\n\n${text}`);
     setCopied(true);
     toast.success("Copiado para a área de transferência!");
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handlePDF = () => {
+  const handlePDF = async () => {
     if (!result) return;
-    const doc = new jsPDF();
-    const pageW = doc.internal.pageSize.getWidth();
-    const margin = 15;
-    const maxW = pageW - margin * 2;
-    let y = 20;
-
-    const addText = (text: string, size = 11, bold = false) => {
-      doc.setFontSize(size);
-      doc.setFont("helvetica", bold ? "bold" : "normal");
-      const lines = doc.splitTextToSize(text, maxW);
-      if (y + lines.length * (size * 0.4) > 280) { doc.addPage(); y = 20; }
-      doc.text(lines, margin, y);
-      y += lines.length * (size * 0.4) + 3;
-    };
-
-    addText(result.titulo, 16, true);
-    y += 2;
-    addText(result.descricao, 10);
-    y += 4;
-
-    result.atividades.forEach((a, i) => {
-      if (y > 240) { doc.addPage(); y = 20; }
-      addText(`Atividade ${i + 1}: ${a.titulo}`, 13, true);
-      addText(a.enunciado, 10);
-      if (a.instrucoes) addText(`Instruções: ${a.instrucoes}`, 10);
-      if (a.tempoEstimado) addText(`Tempo estimado: ${a.tempoEstimado}`, 10);
-      if (a.materiais?.length) addText(`Materiais: ${a.materiais.join(", ")}`, 10);
-      y += 4;
-    });
-
-    doc.save(`atividades-${Date.now()}.pdf`);
-    toast.success("PDF baixado!");
+    if (pdfEstilo === "decorado") {
+      try {
+        await handlePDFDecorado(result, formSnapshot);
+        toast.success("PDF decorado baixado!");
+      } catch {
+        toast.error("Erro ao gerar PDF. Tente novamente.");
+      }
+    } else {
+      handlePDFSimples(result);
+    }
   };
 
   const handleDOCX = () => {
     if (!result) return;
     const content = result.atividades.map((a, i) =>
-      `<h3>Atividade ${i + 1}: ${a.titulo}</h3><p>${a.enunciado}</p><p><b>Instruções:</b> ${a.instrucoes}</p><p><b>Tempo:</b> ${a.tempoEstimado}</p>${a.materiais?.length ? `<p><b>Materiais:</b> ${a.materiais.join(", ")}</p>` : ""}<hr/>`
+      `<h3>Atividade ${i + 1}: ${stripMarkdown(a.titulo)}</h3><p>${stripMarkdown(a.enunciado)}</p><p><b>Instruções:</b> ${stripMarkdown(a.instrucoes)}</p><p><b>Tempo:</b> ${a.tempoEstimado}</p>${a.materiais?.length ? `<p><b>Materiais:</b> ${a.materiais.map(m => stripMarkdown(m)).join(", ")}</p>` : ""}<hr/>`
     ).join("");
-    const html = `<html><body><h1>${result.titulo}</h1><p>${result.descricao}</p>${content}</body></html>`;
+    const html = `<html><body><h1>${stripMarkdown(result.titulo)}</h1><p>${stripMarkdown(result.descricao)}</p>${content}</body></html>`;
     const blob = new Blob([html], { type: "application/msword" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -314,6 +584,50 @@ export default function Atividades() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Formato do PDF</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPdfEstilo("simples")}
+                  className={`p-4 rounded-xl border-2 text-left transition-all ${
+                    pdfEstilo === "simples"
+                      ? "border-primary bg-primary/10 ring-2 ring-primary/30"
+                      : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <LayoutList className="h-5 w-5 text-muted-foreground" />
+                    <span className="font-semibold text-sm">Simples</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Texto limpo, sem cores. Ideal para imprimir e economizar tinta.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPdfEstilo("decorado")}
+                  className={`p-4 rounded-xl border-2 text-left transition-all ${
+                    pdfEstilo === "decorado"
+                      ? "border-primary bg-primary/10 ring-2 ring-primary/30"
+                      : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="h-5 w-5 text-amber-500" />
+                    <span className="font-semibold text-sm">Decorado</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Com cabeçalho, cores e seções destacadas. Estilo profissional.
+                  </p>
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Button type="submit" size="lg" className="w-full gap-2" disabled={isLoading}>
             {isLoading ? (
               <><Loader2 className="h-5 w-5 animate-spin" /> Gerando atividades...</>
@@ -334,16 +648,21 @@ export default function Atividades() {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-8 space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-xl font-bold font-serif">{result.titulo}</h2>
-                  <p className="text-sm text-muted-foreground mt-1">{result.descricao}</p>
+                  <h2 className="text-xl font-bold font-serif">
+                    <RenderText text={result.titulo} />
+                  </h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    <RenderText text={result.descricao} />
+                  </p>
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
                   <Button variant="outline" size="sm" onClick={handleCopy} className="gap-1.5">
                     {copied ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                     Copiar
                   </Button>
                   <Button variant="outline" size="sm" onClick={handlePDF} className="gap-1.5">
-                    <Download className="h-4 w-4" /> PDF
+                    <Download className="h-4 w-4" />
+                    PDF {pdfEstilo === "decorado" ? "✨" : ""}
                   </Button>
                   <Button variant="outline" size="sm" onClick={handleDOCX} className="gap-1.5">
                     <Download className="h-4 w-4" /> DOCX
@@ -366,39 +685,45 @@ export default function Atividades() {
                             {i + 1}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-foreground mb-2">{a.titulo}</h3>
-                            <p className="text-sm text-foreground leading-relaxed mb-3">{a.enunciado}</p>
+                            <h3 className="font-semibold text-foreground mb-2">
+                              <RenderText text={a.titulo} />
+                            </h3>
+                            <p className="text-sm text-foreground leading-relaxed mb-3">
+                              <RenderText text={a.enunciado} />
+                            </p>
 
                             {a.instrucoes && (
                               <div className="bg-muted/50 rounded-lg p-3 mb-3">
                                 <p className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-1">
                                   <Lightbulb className="h-3 w-3" /> Instruções
                                 </p>
-                                <p className="text-sm text-foreground">{a.instrucoes}</p>
+                                <p className="text-sm text-foreground">
+                                  <RenderText text={a.instrucoes} />
+                                </p>
                               </div>
                             )}
 
                             <div className="flex flex-wrap gap-2 text-xs">
                               {a.tempoEstimado && (
                                 <Badge variant="secondary" className="gap-1">
-                                  <Clock className="h-3 w-3" /> {a.tempoEstimado}
+                                  <Clock className="h-3 w-3" /> {stripMarkdown(a.tempoEstimado)}
                                 </Badge>
                               )}
                               {a.tipo && (
                                 <Badge variant="secondary" className="gap-1">
-                                  <Users className="h-3 w-3" /> {a.tipo}
+                                  <Users className="h-3 w-3" /> {stripMarkdown(a.tipo)}
                                 </Badge>
                               )}
                               {a.materiais?.map((m) => (
                                 <Badge key={m} variant="outline" className="gap-1">
-                                  <BookOpen className="h-3 w-3" /> {m}
+                                  <BookOpen className="h-3 w-3" /> {stripMarkdown(m)}
                                 </Badge>
                               ))}
                             </div>
 
                             {a.objetivoPedagogico && (
                               <p className="text-xs text-muted-foreground mt-2 italic">
-                                🎯 {a.objetivoPedagogico}
+                                🎯 <RenderText text={a.objetivoPedagogico} />
                               </p>
                             )}
                           </div>
