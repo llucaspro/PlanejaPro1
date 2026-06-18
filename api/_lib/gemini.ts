@@ -1,7 +1,4 @@
-// Direct HTTP calls to Gemini REST API — sem dependência do SDK @google/genai
-
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
+// Direct HTTP calls to Gemini REST API — tries v1beta (new models) then v1 (stable models)
 
 interface GeminiPart { text: string }
 interface GeminiContent { role: string; parts: GeminiPart[] }
@@ -12,6 +9,15 @@ interface GeminiResponse {
   }>;
   error?: { code: number; message: string; status: string };
 }
+
+// Each entry: [apiVersion, modelName]
+const MODEL_ATTEMPTS: Array<[string, string]> = [
+  ['v1beta', 'gemini-2.5-flash'],
+  ['v1beta', 'gemini-2.0-flash'],
+  ['v1',     'gemini-1.5-flash'],
+  ['v1beta', 'gemini-1.5-flash'],
+  ['v1',     'gemini-1.5-flash-8b'],
+];
 
 function isRetryableStatus(status: number): boolean {
   return status === 429 || status === 503 || status === 502;
@@ -41,9 +47,9 @@ export async function generateWithFallback(
 
   let lastErr: Error = new Error('Nenhum modelo disponível');
 
-  for (const model of MODELS) {
+  for (const [apiVersion, model] of MODEL_ATTEMPTS) {
     try {
-      const url = `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,10 +60,14 @@ export async function generateWithFallback(
 
       if (!res.ok) {
         const errMsg = json.error?.message ?? `HTTP ${res.status}`;
-        console.error(`[gemini] Modelo ${model} falhou (${res.status}): ${errMsg}`);
+        console.error(`[gemini] ${apiVersion}/${model} falhou (${res.status}): ${errMsg}`);
         if (isRetryableStatus(res.status)) {
           lastErr = new Error(errMsg);
           continue;
+        }
+        // Model not found → try next; auth error → stop all
+        if (res.status === 403 || res.status === 401) {
+          throw new Error('Chave Gemini inválida ou sem permissão: ' + errMsg);
         }
         lastErr = new Error(errMsg);
         continue;
@@ -66,15 +76,17 @@ export async function generateWithFallback(
       const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       if (!text) {
         const reason = json.candidates?.[0]?.finishReason ?? 'unknown';
-        console.warn(`[gemini] Modelo ${model} retornou texto vazio (finishReason: ${reason})`);
-        lastErr = new Error(`Modelo ${model} sem conteúdo: ${reason}`);
+        console.warn(`[gemini] ${apiVersion}/${model} sem texto (finishReason: ${reason})`);
+        lastErr = new Error(`Modelo sem conteúdo: ${reason}`);
         continue;
       }
 
+      console.log(`[gemini] Sucesso com ${apiVersion}/${model}`);
       return text;
     } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Chave Gemini')) throw err;
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[gemini] Erro de rede no modelo ${model}: ${msg}`);
+      console.error(`[gemini] Erro de rede ${apiVersion}/${model}: ${msg}`);
       lastErr = err instanceof Error ? err : new Error(msg);
     }
   }
