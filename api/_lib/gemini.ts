@@ -45,7 +45,7 @@ export async function generateWithFallback(
       return response.text ?? "";
     } catch (err) {
       lastErr = err;
-      if (!isRetryableError(err)) throw err;
+      // Always try next fallback model regardless of error type
     }
   }
   throw lastErr;
