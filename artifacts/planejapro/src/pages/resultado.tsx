@@ -37,6 +37,25 @@ function toArr(value: unknown): string[] {
   return [toStr(value)].filter(Boolean);
 }
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/_([^_]+)_/g, "$1");
+}
+
+function RenderText({ text, className }: { text: string; className?: string }) {
+  const parts = text.split(/\*\*([^*]+)\*\*/g);
+  return (
+    <span className={className}>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+      )}
+    </span>
+  );
+}
+
 // ── UI Components ─────────────────────────────────────────────────────────────
 
 function Section({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
@@ -67,7 +86,7 @@ function StringList({ items }: { items: unknown[] }) {
       {strs.map((item, i) => (
         <li key={i} className="flex gap-2 text-sm text-foreground">
           <span className="text-primary mt-0.5">•</span>
-          <span>{item}</span>
+          <RenderText text={item} />
         </li>
       ))}
     </ul>
@@ -75,7 +94,18 @@ function StringList({ items }: { items: unknown[] }) {
 }
 
 function TextBlock({ text }: { text: unknown }) {
-  return <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{toStr(text)}</p>;
+  const str = toStr(text);
+  const lines = str.split("\n");
+  return (
+    <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+      {lines.map((line, li) => (
+        <span key={li}>
+          {li > 0 && "\n"}
+          <RenderText text={line} />
+        </span>
+      ))}
+    </p>
+  );
 }
 
 // ── TXT Export ────────────────────────────────────────────────────────────────
@@ -312,7 +342,7 @@ async function generateAndDownloadPdf(planning: GeneratedPlanning, input: Planni
   }
 
   function addParagraph(text: unknown, fontSize = 9.5) {
-    const str = toStr(text);
+    const str = stripMarkdown(toStr(text));
     if (!str) return;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(fontSize);
@@ -327,7 +357,7 @@ async function generateAndDownloadPdf(planning: GeneratedPlanning, input: Planni
   }
 
   function addBulletList(items: unknown[], numbered = false) {
-    const arr = toArr(items);
+    const arr = toArr(items).map(stripMarkdown);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9.5);
     doc.setTextColor(...C_DARK);
@@ -734,18 +764,18 @@ export default function Resultado() {
                 {melhoriaResult && (
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3 pt-2">
                     <p className="text-sm text-emerald-800 dark:text-emerald-200 font-medium">
-                      {melhoriaResult.resumoMelhorias}
+                      <RenderText text={melhoriaResult.resumoMelhorias} />
                     </p>
                     {melhoriaResult.sugestoes.map((s, i) => (
                       <div key={i} className="bg-muted/50 rounded-lg p-3 space-y-2">
-                        <p className="font-semibold text-sm">{s.titulo}</p>
-                        <p className="text-sm text-muted-foreground">{s.descricao}</p>
+                        <p className="font-semibold text-sm"><RenderText text={s.titulo} /></p>
+                        <p className="text-sm text-muted-foreground"><RenderText text={s.descricao} /></p>
                         {s.comoImplementar && (
                           <div className="bg-background rounded p-2">
                             <p className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-1">
                               <BookOpen className="h-3 w-3" /> Como implementar
                             </p>
-                            <p className="text-xs text-foreground">{s.comoImplementar}</p>
+                            <p className="text-xs text-foreground"><RenderText text={s.comoImplementar} /></p>
                           </div>
                         )}
                         <div className="flex flex-wrap gap-2">
@@ -773,7 +803,7 @@ export default function Resultado() {
                         <ul className="space-y-1">
                           {melhoriaResult.dicasProfessor.map((d, i) => (
                             <li key={i} className="text-xs text-foreground flex gap-1.5">
-                              <span className="text-amber-500">•</span> {d}
+                              <span className="text-amber-500">•</span> <RenderText text={d} />
                             </li>
                           ))}
                         </ul>
@@ -804,7 +834,7 @@ export default function Resultado() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-foreground leading-relaxed">{toStr(planning.versaoResumida)}</p>
+          <p className="text-sm text-foreground leading-relaxed"><RenderText text={toStr(planning.versaoResumida)} /></p>
         </CardContent>
       </Card>
 
@@ -847,7 +877,7 @@ export default function Resultado() {
                 <span className="flex-shrink-0 w-6 h-6 bg-primary/10 text-primary rounded-full text-xs font-semibold flex items-center justify-center">
                   {i + 1}
                 </span>
-                <p className="text-sm text-foreground leading-relaxed">{step}</p>
+                <p className="text-sm text-foreground leading-relaxed"><RenderText text={step} /></p>
               </div>
             ))}
           </div>
