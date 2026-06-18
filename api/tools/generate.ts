@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { eq } from "drizzle-orm";
-import { getDb, usersTable, aiUsageTable } from "../_lib/db";
+import { getDb, usersTable, aiUsageTable, ensureTables } from "../_lib/db";
 import { verifyToken, extractBearerToken } from "../_lib/auth";
 import { generateWithFallback, isOverloadedError2 } from "../_lib/gemini";
 
@@ -17,7 +17,7 @@ function parseJson(raw: string): Record<string, unknown> | null {
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
   if (start !== -1 && end !== -1) raw = raw.slice(start, end + 1);
-  raw = raw.replace(/,\s*([}\]])/g, "$1");
+  raw = raw.replace(/,\s*([}\]])/g, "");
   try { return JSON.parse(raw); } catch { return null; }
 }
 
@@ -204,7 +204,6 @@ async function handleImprove(body: Record<string, unknown>): Promise<{ prompt: s
   const focoKey = s(body.foco, 30);
   const foco = focusMap[focoKey] || "melhorias pedagógicas gerais";
 
-  // Extract human-readable fields from the planning (frontend sends JSON.stringify(planning))
   let planejamentoTexto = "";
   const raw = body.planejamento;
 
@@ -225,7 +224,6 @@ async function handleImprove(body: Record<string, unknown>): Promise<{ prompt: s
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       planejamentoTexto = extractPlanningFields(parsed);
     } catch {
-      // Not valid JSON — use as plain text
       planejamentoTexto = raw.slice(0, 800);
     }
   } else if (raw && typeof raw === "object") {
@@ -270,6 +268,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: "Token inválido ou expirado. Faça login novamente." });
   }
 
+  await ensureTables();
+
   const db = getDb();
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId));
   if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
@@ -298,28 +298,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: msg });
   }
 
+  let raw: string;
   try {
-    const raw = await generateWithFallback(promptData.prompt, promptData.config);
-    const result = parseJson(raw);
-    if (!result) return res.status(500).json({ error: "IA retornou formato inválido. Tente novamente." });
-
-    const estimatedTokens = Math.round((promptData.prompt.length + JSON.stringify(result).length) / 4);
-
-    if (!user.isPremium) {
-      await db.update(usersTable)
-        .set({ freeGenerationsRemaining: user.freeGenerationsRemaining - 1, updatedAt: new Date() })
-        .where(eq(usersTable.id, user.id));
-    }
-
-    await db.insert(aiUsageTable).values({ userId: user.id, requestType: promptData.requestType, estimatedTokens });
-
-    return res.status(200).json({
-      ...result,
-      _meta: {
-        freeGenerationsRemaining: user.isPremium ? null : user.freeGenerationsRemaining - 1,
-        isPremium: user.isPremium,
-      },
-    });
+    raw = await generateWithFallback(promptData.prompt, promptData.config);
   } catch (err) {
     console.error("[tools/generate] Erro ao chamar IA:", err instanceof Error ? err.message : err);
     const isOverloaded = isOverloadedError2(err);
@@ -329,4 +310,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : "Falha ao processar. Tente novamente.";
     return res.status(status).json({ error: message });
   }
+
+  const result = parseJson(raw);
+  if (!result) return res.status(500).json({ error: "IA retornou formato inválido. Tente novamente." });
+
+  const estimatedTokens = Math.round((promptData.prompt.length + JSON.stringify(result).length) / 4);
+
+  // DB writes isoladas: não bloqueiam a resposta se falharem
+  try {
+    if (!user.isPremium) {
+      await db.update(usersTable)
+        .set({ freeGenerationsRemaining: user.freeGenerationsRemaining - 1, updatedAt: new Date() })
+        .where(eq(usersTable.id, user.id));
+    }
+    await db.insert(aiUsageTable).values({ userId: user.id, requestType: promptData.requestType, estimatedTokens });
+  } catch (dbErr) {
+    console.error("[tools/generate] Erro ao salvar no banco (não fatal):", dbErr instanceof Error ? dbErr.message : dbErr);
+  }
+
+  return res.status(200).json({
+    ...result,
+    _meta: {
+      freeGenerationsRemaining: user.isPremium ? null : Math.max(0, user.freeGenerationsRemaining - 1),
+      isPremium: user.isPremium,
+    },
+  });
 }
