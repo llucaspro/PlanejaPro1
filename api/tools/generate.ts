@@ -321,6 +321,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
   } catch (err) {
+    console.error("[tools/generate] Erro ao chamar IA:", err instanceof Error ? err.message : err);
     const isOverloaded = isOverloadedError2(err);
     const status = isOverloaded ? 503 : 500;
     const message = isOverloaded
