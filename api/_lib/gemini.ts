@@ -1,12 +1,7 @@
 // Rodízio automático de IAs gratuitas
-// Ordem: Gemini → Groq → OpenRouter
-// Cada provider é ignorado se sua env var não estiver configurada.
-// Quando um esgota a cota, passa automaticamente para o próximo.
+// Ordem: Gemini → Groq → NVIDIA/DeepSeek → Mistral → OpenRouter
 
-interface GeminiPart { text: string }
-interface GeminiContent { role: string; parts: GeminiPart[] }
-
-// ─── tipos internos ──────────────────────────────────────────────
+interface GeminiContent { role: string; parts: Array<{ text: string }> }
 type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
 
 function toOpenAIMessages(
@@ -18,195 +13,156 @@ function toOpenAIMessages(
   if (systemInstruction) msgs.push({ role: 'system', content: systemInstruction });
   if (history) {
     for (const h of history) {
-      const role = h.role === 'model' ? 'assistant' : 'user';
-      msgs.push({ role, content: h.parts.map(p => p.text).join('') });
+      msgs.push({ role: h.role === 'model' ? 'assistant' : 'user', content: h.parts.map(p => p.text).join('') });
     }
   }
   msgs.push({ role: 'user', content: prompt });
   return msgs;
 }
 
-function isQuotaError(status: number, body: string): boolean {
+function isQuotaErr(status: number, body: string): boolean {
   return status === 429 || body.toLowerCase().includes('quota') || body.toLowerCase().includes('rate limit') || body.toLowerCase().includes('exceeded');
 }
 
-// ─── Provider: Google Gemini ─────────────────────────────────────
+async function callOpenAI(
+  url: string, authHeader: string, model: string,
+  messages: ChatMessage[], maxTokens: number,
+  extraHeaders?: Record<string, string>,
+): Promise<string | null> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': authHeader, ...extraHeaders },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+  });
+  const json = await res.json() as Record<string, unknown>;
+  const body = JSON.stringify(json);
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) throw new Error('AUTH_ERROR:' + model);
+    if (isQuotaErr(res.status, body)) return null; // signal: try next
+    console.error('[ai] ' + model + ' (' + res.status + '):', body.slice(0, 120));
+    return null;
+  }
+  return (json as any)?.choices?.[0]?.message?.content ?? null;
+}
+
+// ─── Gemini ─────────────────────────────────────────────────────
 const GEMINI_MODELS = [
   ['v1beta', 'gemini-2.5-flash'],
   ['v1beta', 'gemini-2.5-flash-lite'],
   ['v1beta', 'gemini-2.0-flash-lite'],
 ] as const;
 
-async function tryGemini(
-  prompt: string,
-  config: Record<string, unknown>,
-  systemInstruction?: string,
-  history?: Array<{ role: string; parts: Array<{ text: string }> }>,
-): Promise<string | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-
-  const contents: GeminiContent[] = history
-    ? [...history as GeminiContent[], { role: 'user', parts: [{ text: prompt }] }]
-    : [{ role: 'user', parts: [{ text: prompt }] }];
-
-  const requestBody: Record<string, unknown> = { contents, generationConfig: config };
-  if (systemInstruction) requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
-
+async function tryGemini(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  const contents = hist ? [...hist, { role: 'user', parts: [{ text: prompt }] }] : [{ role: 'user', parts: [{ text: prompt }] }];
+  const body: Record<string, unknown> = { contents, generationConfig: config };
+  if (sys) body.systemInstruction = { parts: [{ text: sys }] };
   for (const [ver, model] of GEMINI_MODELS) {
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${apiKey}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) },
-      );
+      const res = await fetch(`https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const json = await res.json() as Record<string, unknown>;
-      const body = JSON.stringify(json);
-
+      const raw = JSON.stringify(json);
       if (!res.ok) {
-        console.error(`[gemini] ${model} (${res.status})`);
-        if (isQuotaError(res.status, body)) { console.warn('[gemini] cota esgotada, tentando próximo modelo'); continue; }
-        if (res.status === 401 || res.status === 403) return null; // chave inválida, pula provider
+        if (res.status === 401 || res.status === 403) return null;
+        if (isQuotaErr(res.status, raw)) { console.warn('[gemini] cota esgotada em ' + model); continue; }
         continue;
       }
-
       const text = (json as any)?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      if (text) { console.log(`[AI] Gemini/${model} ✓`); return text; }
-    } catch (e) {
-      console.error('[gemini] erro de rede:', e instanceof Error ? e.message : e);
-    }
+      if (text) { console.log('[AI] Gemini/' + model + ' ✓'); return text; }
+    } catch (e) { console.error('[gemini] rede:', (e as Error).message); }
   }
-  return null; // todos os modelos Gemini falharam
+  return null;
 }
 
-// ─── Provider: Groq (free tier: 14400 req/dia) ──────────────────
-const GROQ_MODELS = [
-  'llama-3.3-70b-versatile',
-  'llama3-70b-8192',
-  'gemma2-9b-it',
-];
-
-async function tryGroq(
-  prompt: string,
-  config: Record<string, unknown>,
-  systemInstruction?: string,
-  history?: Array<{ role: string; parts: Array<{ text: string }> }>,
-): Promise<string | null> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) return null;
-
-  const messages = toOpenAIMessages(prompt, systemInstruction, history);
-  const maxTokens = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
-
+// ─── Groq ────────────────────────────────────────────────────────
+const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama3-70b-8192', 'gemma2-9b-it'];
+async function tryGroq(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) return null;
+  const msgs = toOpenAIMessages(prompt, sys, hist as any);
+  const max = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
   for (const model of GROQ_MODELS) {
     try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 }),
-      });
-      const json = await res.json() as Record<string, unknown>;
-      const body = JSON.stringify(json);
-
-      if (!res.ok) {
-        console.error(`[groq] ${model} (${res.status})`);
-        if (isQuotaError(res.status, body)) { console.warn('[groq] cota esgotada, tentando próximo modelo'); continue; }
-        if (res.status === 401) return null;
-        continue;
-      }
-
-      const text = (json as any)?.choices?.[0]?.message?.content ?? '';
-      if (text) { console.log(`[AI] Groq/${model} ✓`); return text; }
-    } catch (e) {
-      console.error('[groq] erro de rede:', e instanceof Error ? e.message : e);
-    }
+      const text = await callOpenAI('https://api.groq.com/openai/v1/chat/completions', 'Bearer ' + key, model, msgs, max);
+      if (text) { console.log('[AI] Groq/' + model + ' ✓'); return text; }
+    } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
   }
   return null;
 }
 
-// ─── Provider: OpenRouter (modelos :free) ───────────────────────
-const OPENROUTER_MODELS = [
-  'meta-llama/llama-3.3-70b-instruct:free',
-  'google/gemma-3-27b-it:free',
-  'qwen/qwen-2.5-72b-instruct:free',
-  'mistralai/mistral-7b-instruct:free',
-];
-
-async function tryOpenRouter(
-  prompt: string,
-  config: Record<string, unknown>,
-  systemInstruction?: string,
-  history?: Array<{ role: string; parts: Array<{ text: string }> }>,
-): Promise<string | null> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return null;
-
-  const messages = toOpenAIMessages(prompt, systemInstruction, history);
-  const maxTokens = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
-
-  for (const model of OPENROUTER_MODELS) {
+// ─── NVIDIA NIM / DeepSeek ──────────────────────────────────────
+const NVIDIA_MODELS = ['deepseek-ai/deepseek-r1', 'meta/llama-3.3-70b-instruct', 'nvidia/llama-3.1-nemotron-70b-instruct'];
+async function tryNvidia(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+  const key = process.env.NVIDIA_API_KEY;
+  if (!key) return null;
+  const msgs = toOpenAIMessages(prompt, sys, hist as any);
+  const max = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
+  for (const model of NVIDIA_MODELS) {
     try {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': 'https://planejasp.vercel.app',
-          'X-Title': 'PlanejaPro',
-        },
-        body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
-      });
-      const json = await res.json() as Record<string, unknown>;
-      const body = JSON.stringify(json);
-
-      if (!res.ok) {
-        console.error(`[openrouter] ${model} (${res.status})`);
-        if (isQuotaError(res.status, body)) { console.warn('[openrouter] cota esgotada, tentando próximo'); continue; }
-        if (res.status === 401) return null;
-        continue;
-      }
-
-      const text = (json as any)?.choices?.[0]?.message?.content ?? '';
-      if (text) { console.log(`[AI] OpenRouter/${model} ✓`); return text; }
-    } catch (e) {
-      console.error('[openrouter] erro de rede:', e instanceof Error ? e.message : e);
-    }
+      const text = await callOpenAI('https://integrate.api.nvidia.com/v1/chat/completions', 'Bearer ' + key, model, msgs, max);
+      if (text) { console.log('[AI] NVIDIA/' + model + ' ✓'); return text; }
+    } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
   }
   return null;
 }
 
-// ─── Rodízio principal ───────────────────────────────────────────
+// ─── Mistral ────────────────────────────────────────────────────
+const MISTRAL_MODELS = ['mistral-small-latest', 'open-mistral-7b', 'open-mixtral-8x7b'];
+async function tryMistral(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+  const key = process.env.MISTRAL_API_KEY;
+  if (!key) return null;
+  const msgs = toOpenAIMessages(prompt, sys, hist as any);
+  const max = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
+  for (const model of MISTRAL_MODELS) {
+    try {
+      const text = await callOpenAI('https://api.mistral.ai/v1/chat/completions', 'Bearer ' + key, model, msgs, max);
+      if (text) { console.log('[AI] Mistral/' + model + ' ✓'); return text; }
+    } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
+  }
+  return null;
+}
+
+// ─── OpenRouter ─────────────────────────────────────────────────
+const OR_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemma-3-27b-it:free', 'qwen/qwen-2.5-72b-instruct:free', 'mistralai/mistral-7b-instruct:free'];
+async function tryOpenRouter(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return null;
+  const msgs = toOpenAIMessages(prompt, sys, hist as any);
+  const max = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
+  for (const model of OR_MODELS) {
+    try {
+      const text = await callOpenAI('https://openrouter.ai/api/v1/chat/completions', 'Bearer ' + key, model, msgs, max,
+        { 'HTTP-Referer': 'https://planejasp.vercel.app', 'X-Title': 'PlanejaPro' });
+      if (text) { console.log('[AI] OpenRouter/' + model + ' ✓'); return text; }
+    } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
+  }
+  return null;
+}
+
+// ─── Rodízio principal ──────────────────────────────────────────
 export async function generateWithFallback(
   prompt: string,
   config: Record<string, unknown>,
   systemInstruction?: string,
   history?: Array<{ role: string; parts: Array<{ text: string }> }>,
 ): Promise<string> {
-  // Ordem de prioridade: Gemini → Groq → OpenRouter
   const result =
-    (await tryGemini(prompt, config, systemInstruction, history)) ??
-    (await tryGroq(prompt, config, systemInstruction, history)) ??
-    (await tryOpenRouter(prompt, config, systemInstruction, history));
+    (await tryGemini(prompt, config, systemInstruction, history as any)) ??
+    (await tryGroq(prompt, config, systemInstruction, history as any)) ??
+    (await tryNvidia(prompt, config, systemInstruction, history as any)) ??
+    (await tryMistral(prompt, config, systemInstruction, history as any)) ??
+    (await tryOpenRouter(prompt, config, systemInstruction, history as any));
 
   if (result) return result;
-
-  throw new Error(
-    'QUOTA_EXCEEDED: Todos os provedores de IA estão com cota esgotada. Configure GROQ_API_KEY e/ou OPENROUTER_API_KEY na Vercel para mais capacidade.',
-  );
+  throw new Error('QUOTA_EXCEEDED: Todos os provedores de IA estão indisponíveis no momento. Tente novamente em alguns instantes.');
 }
 
 export function isOverloadedError2(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
-  return (
-    msg.includes('quota') ||
-    msg.includes('quota_exceeded') ||
-    msg.includes('503') ||
-    msg.includes('overloaded') ||
-    msg.includes('unavailable') ||
-    msg.includes('429') ||
-    msg.includes('rate limit') ||
-    msg.includes('resource_exhausted') ||
-    msg.includes('too many requests') ||
-    msg.includes('service unavailable')
-  );
+  return msg.includes('quota') || msg.includes('503') || msg.includes('overloaded') ||
+    msg.includes('429') || msg.includes('rate limit') || msg.includes('resource_exhausted') ||
+    msg.includes('too many requests') || msg.includes('service unavailable');
 }
