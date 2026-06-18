@@ -435,12 +435,17 @@ export default function Admin() {
                 const isErr = info.status.startsWith('❌') || info.status === 'not tested';
                 const notConfigured = !info.configured;
 
-                const NAMES: Record<string, { label: string; desc: string; link: string }> = {
-                  gemini:     { label: 'Google Gemini', desc: 'gemini-2.5-flash • free tier 20 req/min', link: 'https://aistudio.google.com/apikey' },
-                  groq:       { label: 'Groq',          desc: 'llama-3.3-70b • free tier 14.400 req/dia', link: 'https://console.groq.com' },
-                  openrouter: { label: 'OpenRouter',    desc: 'modelos :free ilimitados', link: 'https://openrouter.ai' },
+                const NAMES: Record<string, { label: string; desc: string; reset: string; link: string }> = {
+                  gemini:     { label: 'Google Gemini', desc: 'gemini-2.5-flash · free tier · 20 req/min', reset: '🔄 Renova a cada 1 minuto', link: 'https://aistudio.google.com/apikey' },
+                  groq:       { label: 'Groq',          desc: 'llama-3.3-70b · free tier · 14.400 req/dia', reset: '🔄 Renova todo dia à meia-noite (UTC)', link: 'https://console.groq.com' },
+                  openrouter: { label: 'OpenRouter',    desc: 'modelos :free · sem limite diário fixo', reset: '🔄 Rate limit por modelo · geralmente por minuto', link: 'https://openrouter.ai' },
                 };
                 const meta = NAMES[name] ?? { label: name, desc: '', link: '' };
+
+                // Parse retry-in seconds from status when quota exceeded
+                const retryMatch = info.status.match(/retry in ([\d.]+)s/i);
+                const retrySeconds = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) : null;
+                const formatRetry = (s: number) => s < 60 ? `${s}s` : `${Math.ceil(s/60)}min`;
 
                 return (
                   <Card key={name} className={isOk ? 'border-green-200 dark:border-green-900' : isWarn ? 'border-amber-200 dark:border-amber-900' : notConfigured ? 'border-dashed opacity-70' : 'border-red-200 dark:border-red-900'}>
@@ -458,9 +463,15 @@ export default function Admin() {
                             }
                             {isOk && <Badge className="text-xs bg-green-100 text-green-800">Online</Badge>}
                             {isWarn && <Badge className="text-xs bg-amber-100 text-amber-800">Cota esgotada</Badge>}
+                            {isWarn && retrySeconds && (
+                              <Badge className="text-xs bg-orange-100 text-orange-800 gap-1">
+                                <Clock className="h-3 w-3" /> Renova em {formatRetry(retrySeconds)}
+                              </Badge>
+                            )}
                             {isErr && info.configured && <Badge variant="destructive" className="text-xs">Erro</Badge>}
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">{meta.desc}</p>
+                          <p className="text-xs text-muted-foreground">{meta.reset}</p>
                           {info.configured && (
                             <p className="text-xs mt-1.5 font-mono bg-muted rounded px-2 py-1 break-all">{info.status.slice(0, 120)}</p>
                           )}
