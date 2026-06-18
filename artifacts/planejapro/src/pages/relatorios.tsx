@@ -89,6 +89,280 @@ function PremiumOverlay({ tool }: { tool: string }) {
   );
 }
 
+async function generateRelatorioPdf(result: Result, formData: Partial<FormData>) {
+  const { default: jsPDF } = await import("jspdf");
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  const PW = 210;
+  const PH = 297;
+  const MARGIN = 18;
+  const CW = PW - MARGIN * 2;
+  const FOOTER_H = 10;
+  const CONTENT_BOTTOM = PH - FOOTER_H - 6;
+
+  const C_BLUE: [number, number, number] = [37, 99, 235];
+  const C_BLUE_LIGHT: [number, number, number] = [219, 234, 254];
+  const C_DARK: [number, number, number] = [17, 24, 39];
+  const C_GRAY: [number, number, number] = [100, 116, 139];
+  const C_WHITE: [number, number, number] = [255, 255, 255];
+  const C_BG: [number, number, number] = [248, 250, 252];
+  const C_GREEN: [number, number, number] = [22, 163, 74];
+  const C_GREEN_BG: [number, number, number] = [240, 253, 244];
+  const C_LINE: [number, number, number] = [203, 213, 225];
+
+  let y = 0;
+  let pageNum = 1;
+
+  function drawFooter() {
+    const fy = PH - FOOTER_H;
+    doc.setFillColor(...C_BLUE);
+    doc.rect(0, fy, PW, FOOTER_H, "F");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(...C_WHITE);
+    doc.text("Gerado por PlanejaPro — Documento pedagógico", MARGIN, fy + 6.5);
+    doc.text(`Página ${pageNum}`, PW - MARGIN, fy + 6.5, { align: "right" });
+  }
+
+  function newPage() {
+    drawFooter();
+    doc.addPage();
+    pageNum++;
+    y = MARGIN + 4;
+  }
+
+  function checkSpace(needed: number) {
+    if (y + needed > CONTENT_BOTTOM) newPage();
+  }
+
+  function renderBlock(text: string, fontSize: number, bold: boolean, color: [number, number, number], x: number, maxW: number, lineH: number): number {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(fontSize);
+    doc.setTextColor(...color);
+    const lines = doc.splitTextToSize(text, maxW) as string[];
+    for (const line of lines) {
+      checkSpace(lineH + 1);
+      doc.text(line, x, y);
+      y += lineH;
+    }
+    return lines.length * lineH;
+  }
+
+  // ── Header ─────────────────────────────────────────────────────────────────
+  const tipoObj = TIPOS.find(t => t.value === result.tipo);
+  const tipoLabel = tipoObj ? tipoObj.label : "Relatório Pedagógico";
+  const titleLines = doc.splitTextToSize(result.titulo, CW - 10) as string[];
+  const headerH = 18 + titleLines.length * 7;
+
+  doc.setFillColor(...C_BLUE);
+  doc.rect(0, 0, PW, headerH, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...C_WHITE);
+  doc.setFillColor(255, 255, 255, 0.15);
+  doc.text("PlanejaPro", MARGIN, 10);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  const dateStr = new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+  doc.text(dateStr, PW - MARGIN, 10, { align: "right" });
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(...C_WHITE);
+  for (let i = 0; i < titleLines.length; i++) {
+    doc.text(titleLines[i], MARGIN, 18 + i * 7);
+  }
+
+  y = headerH + 4;
+
+  // ── Tipo badge strip ────────────────────────────────────────────────────────
+  doc.setFillColor(...C_BLUE_LIGHT);
+  doc.rect(MARGIN, y, CW, 9, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(...C_BLUE);
+  doc.text(tipoLabel.toUpperCase(), MARGIN + 4, y + 6);
+  y += 13;
+
+  // ── Info Grid ───────────────────────────────────────────────────────────────
+  const hasAluno = formData.nomeAluno || formData.anoSerie || formData.disciplina || formData.periodo;
+  if (hasAluno) {
+    const infoH = 26;
+    doc.setFillColor(...C_BG);
+    doc.rect(MARGIN, y, CW, infoH, "F");
+    doc.setDrawColor(...C_BLUE_LIGHT);
+    doc.setLineWidth(0.3);
+    doc.rect(MARGIN, y, CW, infoH);
+
+    const col1x = MARGIN + 4;
+    const col2x = MARGIN + CW / 2 + 4;
+    const halfW = CW / 2 - 8;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(...C_GRAY);
+
+    if (formData.nomeAluno) {
+      doc.text("ALUNO(A)", col1x, y + 6);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...C_DARK);
+      const nLines = doc.splitTextToSize(formData.nomeAluno, halfW) as string[];
+      doc.text(nLines[0], col1x, y + 12);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(...C_GRAY);
+    }
+
+    if (formData.disciplina) {
+      doc.text("DISCIPLINA", col2x, y + 6);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...C_DARK);
+      const dLines = doc.splitTextToSize(formData.disciplina, halfW) as string[];
+      doc.text(dLines[0], col2x, y + 12);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(...C_GRAY);
+    }
+
+    if (formData.anoSerie) {
+      doc.text("ANO/SÉRIE", col1x, y + 19);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...C_DARK);
+      doc.text(formData.anoSerie, col1x, y + 25);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(...C_GRAY);
+    }
+
+    if (formData.periodo) {
+      doc.text("PERÍODO", col2x, y + 19);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(...C_DARK);
+      doc.text(formData.periodo, col2x, y + 25);
+    }
+
+    y += infoH + 8;
+  }
+
+  // ── Report Text ─────────────────────────────────────────────────────────────
+  checkSpace(14);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...C_BLUE);
+  doc.text("TEXTO DO RELATÓRIO", MARGIN, y);
+  y += 5;
+
+  doc.setDrawColor(...C_BLUE);
+  doc.setLineWidth(0.5);
+  doc.line(MARGIN, y, MARGIN + CW, y);
+  y += 5;
+
+  const paragraphs = result.textoCompleto.split(/\n+/).filter(p => p.trim().length > 0);
+  for (const para of paragraphs) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(...C_DARK);
+    const lines = doc.splitTextToSize(para.trim(), CW) as string[];
+    for (const line of lines) {
+      checkSpace(7);
+      doc.text(line, MARGIN, y);
+      y += 6;
+    }
+    y += 2;
+  }
+
+  y += 4;
+
+  // ── Key Points ─────────────────────────────────────────────────────────────
+  if (result.pontosPrincipais && result.pontosPrincipais.length > 0) {
+    checkSpace(18);
+
+    doc.setFillColor(...C_BLUE);
+    doc.rect(MARGIN, y, CW, 9, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...C_WHITE);
+    doc.text("PONTOS PRINCIPAIS", MARGIN + 5, y + 6.2);
+    y += 12;
+
+    for (const ponto of result.pontosPrincipais) {
+      const lines = doc.splitTextToSize(ponto, CW - 12) as string[];
+      const rowH = lines.length * 6 + 6;
+      checkSpace(rowH + 2);
+
+      doc.setFillColor(...C_BG);
+      doc.rect(MARGIN, y, CW, rowH, "F");
+
+      doc.setFillColor(...C_BLUE);
+      doc.circle(MARGIN + 4, y + rowH / 2, 1.8, "F");
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(...C_DARK);
+      for (let li = 0; li < lines.length; li++) {
+        doc.text(lines[li], MARGIN + 10, y + 5 + li * 6);
+      }
+
+      doc.setDrawColor(...C_LINE);
+      doc.setLineWidth(0.15);
+      doc.line(MARGIN, y + rowH, MARGIN + CW, y + rowH);
+      y += rowH + 1;
+    }
+
+    y += 6;
+  }
+
+  // ── Recommendations ─────────────────────────────────────────────────────────
+  if (result.recomendacoes && result.recomendacoes.length > 0) {
+    checkSpace(18);
+
+    doc.setFillColor(...C_GREEN);
+    doc.rect(MARGIN, y, CW, 9, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...C_WHITE);
+    doc.text("RECOMENDAÇÕES", MARGIN + 5, y + 6.2);
+    y += 12;
+
+    for (const rec of result.recomendacoes) {
+      const lines = doc.splitTextToSize(rec, CW - 12) as string[];
+      const rowH = lines.length * 6 + 6;
+      checkSpace(rowH + 2);
+
+      doc.setFillColor(...C_GREEN_BG);
+      doc.rect(MARGIN, y, CW, rowH, "F");
+
+      doc.setFillColor(...C_GREEN);
+      doc.rect(MARGIN, y, 3, rowH, "F");
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(...C_DARK);
+      for (let li = 0; li < lines.length; li++) {
+        doc.text(lines[li], MARGIN + 7, y + 5 + li * 6);
+      }
+
+      doc.setDrawColor(187, 247, 208);
+      doc.setLineWidth(0.15);
+      doc.line(MARGIN, y + rowH, MARGIN + CW, y + rowH);
+      y += rowH + 1;
+    }
+  }
+
+  drawFooter();
+
+  const slug = (result.tipo || "relatorio").toLowerCase().replace(/\s+/g, "-");
+  const filename = `relatorio-${slug}-${Date.now()}.pdf`;
+  doc.save(filename);
+}
+
 export default function Relatorios() {
   const [, navigate] = useLocation();
   const { token, user } = useAuth();
@@ -96,6 +370,7 @@ export default function Relatorios() {
   const [result, setResult] = useState<Result | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [formSnapshot, setFormSnapshot] = useState<Partial<FormData>>({});
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -109,6 +384,7 @@ export default function Relatorios() {
   const onSubmit = async (data: FormData) => {
     setIsLoading(true);
     setResult(null);
+    setFormSnapshot(data);
     try {
       const res = await fetch("/api/tools/generate", {
         method: "POST",
@@ -140,7 +416,7 @@ export default function Relatorios() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDownload = () => {
+  const handleDownloadDocx = () => {
     if (!result) return;
     const html = `<html><body><h1>${result.titulo}</h1><div style="white-space:pre-wrap;line-height:1.6">${result.textoCompleto}</div><h3>Recomendações</h3><ul>${result.recomendacoes.map(r => `<li>${r}</li>`).join("")}</ul></body></html>`;
     const blob = new Blob([html], { type: "application/msword" });
@@ -148,6 +424,17 @@ export default function Relatorios() {
     const a = document.createElement("a");
     a.href = url; a.download = `relatorio-${Date.now()}.doc`; a.click();
     URL.revokeObjectURL(url);
+    toast.success("Arquivo Word baixado!");
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!result) return;
+    try {
+      await generateRelatorioPdf(result, formSnapshot);
+      toast.success("PDF baixado!");
+    } catch {
+      toast.error("Erro ao gerar PDF. Tente novamente.");
+    }
   };
 
   return (
@@ -273,14 +560,17 @@ export default function Relatorios() {
 
           {result && !isLoading && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-8 space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-3">
                 <h2 className="text-lg font-bold">{result.titulo}</h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button variant="outline" size="sm" onClick={handleCopy} className="gap-1.5">
                     {copied ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                     Copiar
                   </Button>
-                  <Button variant="outline" size="sm" onClick={handleDownload} className="gap-1.5">
+                  <Button variant="outline" size="sm" onClick={handleDownloadPdf} className="gap-1.5">
+                    <Download className="h-4 w-4" /> PDF
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleDownloadDocx} className="gap-1.5">
                     <Download className="h-4 w-4" /> DOCX
                   </Button>
                 </div>
