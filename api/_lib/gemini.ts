@@ -25,17 +25,26 @@ function isQuotaErr(status: number, body: string): boolean {
   return status === 429 || low.includes('quota') || low.includes('rate limit') || low.includes('exceeded') || low.includes('too many');
 }
 
-// Safe JSON parser — handles SSE/streaming responses gracefully
+// Safe JSON parser — handles SSE/streaming responses from NVIDIA and others.
+// NVIDIA NIM returns "data: {...}\n\n" by default unless stream:false is set.
+// We also pass stream:false explicitly but this guard handles edge cases.
 async function safeJson(res: Response): Promise<Record<string, unknown>> {
   const text = await res.text();
-  // NVIDIA and some APIs may return SSE lines: "data: {...}"
-  const cleaned = text.startsWith('data:') ? text.replace(/^data:s*/m, '').split('
-')[0] : text;
+  let toParse = text.trim();
+  // Handle SSE format: lines starting with "data: " followed by JSON
+  if (toParse.startsWith('data:')) {
+    const braceIdx = toParse.indexOf('{');
+    if (braceIdx !== -1) {
+      // Grab only up to the first newline after the opening brace
+      const afterBrace = toParse.slice(braceIdx);
+      const newlineIdx = afterBrace.indexOf('\n');
+      toParse = newlineIdx !== -1 ? afterBrace.slice(0, newlineIdx) : afterBrace;
+    }
+  }
   try {
-    return JSON.parse(cleaned) as Record<string, unknown>;
+    return JSON.parse(toParse) as Record<string, unknown>;
   } catch {
-    // Return a fake error object so callers can handle gracefully
-    return { error: { message: 'Resposta inválida do servidor: ' + text.slice(0, 80), code: res.status } };
+    return { error: { message: 'Resposta invalida do servidor: ' + text.slice(0, 80), code: res.status } };
   }
 }
 
@@ -58,7 +67,7 @@ async function callOpenAI(
 
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) throw new Error('AUTH_ERROR:' + model);
-    if (isQuotaErr(res.status, bodyStr)) return null; // signal: try next provider
+    if (isQuotaErr(res.status, bodyStr)) return null;
     console.error('[ai] ' + model + ' (' + res.status + '):', bodyStr.slice(0, 120));
     return null;
   }
@@ -102,14 +111,15 @@ async function tryGemini(
         continue;
       }
       const text = (json as any)?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      if (text) { console.log('[AI] Gemini/' + model + ' ✓'); return text; }
+      if (text) { console.log('[AI] Gemini/' + model + ' ok'); return text; }
     } catch (e) { console.error('[gemini] rede:', (e as Error).message); }
   }
   return null;
 }
 
-// ─── Groq ────────────────────────────────────────────────────────
+// ─── Groq ─────────────────────────────────────────────────────────
 const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama3-70b-8192', 'gemma2-9b-it'];
+
 async function tryGroq(
   prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>,
 ): Promise<string | null> {
@@ -120,19 +130,20 @@ async function tryGroq(
   for (const model of GROQ_MODELS) {
     try {
       const text = await callOpenAI('https://api.groq.com/openai/v1/chat/completions', 'Bearer ' + key, model, msgs, max);
-      if (text) { console.log('[AI] Groq/' + model + ' ✓'); return text; }
+      if (text) { console.log('[AI] Groq/' + model + ' ok'); return text; }
     } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
   }
   return null;
 }
 
-// ─── NVIDIA NIM / DeepSeek ───────────────────────────────────────
-// stream:false is critical — NVIDIA returns SSE by default which breaks JSON.parse
+// ─── NVIDIA NIM / DeepSeek ─────────────────────────────────────────
+// stream:false is mandatory — NVIDIA defaults to SSE which breaks JSON.parse
 const NVIDIA_MODELS = [
   'deepseek-ai/deepseek-r1',
   'meta/llama-3.3-70b-instruct',
   'nvidia/llama-3.1-nemotron-70b-instruct',
 ];
+
 async function tryNvidia(
   prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>,
 ): Promise<string | null> {
@@ -142,14 +153,13 @@ async function tryNvidia(
   const max = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
   for (const model of NVIDIA_MODELS) {
     try {
-      // stream:false passed via extraBody to ensure non-streaming JSON response
       const text = await callOpenAI(
         'https://integrate.api.nvidia.com/v1/chat/completions',
         'Bearer ' + key, model, msgs, max,
-        {}, // no extra headers
-        { stream: false }, // force non-streaming
+        {},
+        { stream: false },
       );
-      if (text) { console.log('[AI] NVIDIA/' + model + ' ✓'); return text; }
+      if (text) { console.log('[AI] NVIDIA/' + model + ' ok'); return text; }
     } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
   }
   return null;
@@ -157,6 +167,7 @@ async function tryNvidia(
 
 // ─── Mistral ─────────────────────────────────────────────────────
 const MISTRAL_MODELS = ['mistral-small-latest', 'open-mistral-7b', 'open-mixtral-8x7b'];
+
 async function tryMistral(
   prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>,
 ): Promise<string | null> {
@@ -167,19 +178,20 @@ async function tryMistral(
   for (const model of MISTRAL_MODELS) {
     try {
       const text = await callOpenAI('https://api.mistral.ai/v1/chat/completions', 'Bearer ' + key, model, msgs, max);
-      if (text) { console.log('[AI] Mistral/' + model + ' ✓'); return text; }
+      if (text) { console.log('[AI] Mistral/' + model + ' ok'); return text; }
     } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
   }
   return null;
 }
 
-// ─── OpenRouter ──────────────────────────────────────────────────
+// ─── OpenRouter ───────────────────────────────────────────────────
 const OR_MODELS = [
   'meta-llama/llama-3.3-70b-instruct:free',
   'google/gemma-3-27b-it:free',
   'qwen/qwen-2.5-72b-instruct:free',
   'mistralai/mistral-7b-instruct:free',
 ];
+
 async function tryOpenRouter(
   prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>,
 ): Promise<string | null> {
@@ -193,13 +205,13 @@ async function tryOpenRouter(
         'https://openrouter.ai/api/v1/chat/completions', 'Bearer ' + key, model, msgs, max,
         { 'HTTP-Referer': 'https://planejasp.vercel.app', 'X-Title': 'PlanejaPro' },
       );
-      if (text) { console.log('[AI] OpenRouter/' + model + ' ✓'); return text; }
+      if (text) { console.log('[AI] OpenRouter/' + model + ' ok'); return text; }
     } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
   }
   return null;
 }
 
-// ─── Rodízio principal ───────────────────────────────────────────
+// ─── Rodízio principal ────────────────────────────────────────────
 export async function generateWithFallback(
   prompt: string,
   config: Record<string, unknown>,
@@ -214,7 +226,7 @@ export async function generateWithFallback(
     (await tryOpenRouter(prompt, config, systemInstruction, history as any));
 
   if (result) return result;
-  throw new Error('QUOTA_EXCEEDED: Todos os provedores de IA estão indisponíveis no momento. Tente novamente em alguns instantes.');
+  throw new Error('QUOTA_EXCEEDED: Todos os provedores de IA estao indisponiveis. Tente novamente em alguns instantes.');
 }
 
 export function isOverloadedError2(err: unknown): boolean {
