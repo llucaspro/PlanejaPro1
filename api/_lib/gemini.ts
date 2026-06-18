@@ -21,28 +21,50 @@ function toOpenAIMessages(
 }
 
 function isQuotaErr(status: number, body: string): boolean {
-  return status === 429 || body.toLowerCase().includes('quota') || body.toLowerCase().includes('rate limit') || body.toLowerCase().includes('exceeded');
+  const low = body.toLowerCase();
+  return status === 429 || low.includes('quota') || low.includes('rate limit') || low.includes('exceeded') || low.includes('too many');
+}
+
+// Safe JSON parser — handles SSE/streaming responses gracefully
+async function safeJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  // NVIDIA and some APIs may return SSE lines: "data: {...}"
+  const cleaned = text.startsWith('data:') ? text.replace(/^data:s*/m, '').split('
+')[0] : text;
+  try {
+    return JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    // Return a fake error object so callers can handle gracefully
+    return { error: { message: 'Resposta inválida do servidor: ' + text.slice(0, 80), code: res.status } };
+  }
 }
 
 async function callOpenAI(
-  url: string, authHeader: string, model: string,
-  messages: ChatMessage[], maxTokens: number,
+  url: string,
+  authHeader: string,
+  model: string,
+  messages: ChatMessage[],
+  maxTokens: number,
   extraHeaders?: Record<string, string>,
+  extraBody?: Record<string, unknown>,
 ): Promise<string | null> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': authHeader, ...extraHeaders },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens }),
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, stream: false, ...extraBody }),
   });
-  const json = await res.json() as Record<string, unknown>;
-  const body = JSON.stringify(json);
+  const json = await safeJson(res);
+  const bodyStr = JSON.stringify(json);
+
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) throw new Error('AUTH_ERROR:' + model);
-    if (isQuotaErr(res.status, body)) return null; // signal: try next
-    console.error('[ai] ' + model + ' (' + res.status + '):', body.slice(0, 120));
+    if (isQuotaErr(res.status, bodyStr)) return null; // signal: try next provider
+    console.error('[ai] ' + model + ' (' + res.status + '):', bodyStr.slice(0, 120));
     return null;
   }
-  return (json as any)?.choices?.[0]?.message?.content ?? null;
+
+  const text = (json as any)?.choices?.[0]?.message?.content ?? '';
+  return text || null;
 }
 
 // ─── Gemini ─────────────────────────────────────────────────────
@@ -52,21 +74,31 @@ const GEMINI_MODELS = [
   ['v1beta', 'gemini-2.0-flash-lite'],
 ] as const;
 
-async function tryGemini(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+async function tryGemini(
+  prompt: string,
+  config: Record<string, unknown>,
+  sys?: string,
+  hist?: Array<GeminiContent>,
+): Promise<string | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  const contents = hist ? [...hist, { role: 'user', parts: [{ text: prompt }] }] : [{ role: 'user', parts: [{ text: prompt }] }];
+  const contents = hist
+    ? [...hist, { role: 'user', parts: [{ text: prompt }] }]
+    : [{ role: 'user', parts: [{ text: prompt }] }];
   const body: Record<string, unknown> = { contents, generationConfig: config };
   if (sys) body.systemInstruction = { parts: [{ text: sys }] };
+
   for (const [ver, model] of GEMINI_MODELS) {
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      );
       const json = await res.json() as Record<string, unknown>;
       const raw = JSON.stringify(json);
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) return null;
-        if (isQuotaErr(res.status, raw)) { console.warn('[gemini] cota esgotada em ' + model); continue; }
+        if (isQuotaErr(res.status, raw)) { console.warn('[gemini] cota: ' + model); continue; }
         continue;
       }
       const text = (json as any)?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
@@ -78,7 +110,9 @@ async function tryGemini(prompt: string, config: Record<string, unknown>, sys?: 
 
 // ─── Groq ────────────────────────────────────────────────────────
 const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama3-70b-8192', 'gemma2-9b-it'];
-async function tryGroq(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+async function tryGroq(
+  prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>,
+): Promise<string | null> {
   const key = process.env.GROQ_API_KEY;
   if (!key) return null;
   const msgs = toOpenAIMessages(prompt, sys, hist as any);
@@ -92,25 +126,40 @@ async function tryGroq(prompt: string, config: Record<string, unknown>, sys?: st
   return null;
 }
 
-// ─── NVIDIA NIM / DeepSeek ──────────────────────────────────────
-const NVIDIA_MODELS = ['deepseek-ai/deepseek-r1', 'meta/llama-3.3-70b-instruct', 'nvidia/llama-3.1-nemotron-70b-instruct'];
-async function tryNvidia(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+// ─── NVIDIA NIM / DeepSeek ───────────────────────────────────────
+// stream:false is critical — NVIDIA returns SSE by default which breaks JSON.parse
+const NVIDIA_MODELS = [
+  'deepseek-ai/deepseek-r1',
+  'meta/llama-3.3-70b-instruct',
+  'nvidia/llama-3.1-nemotron-70b-instruct',
+];
+async function tryNvidia(
+  prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>,
+): Promise<string | null> {
   const key = process.env.NVIDIA_API_KEY;
   if (!key) return null;
   const msgs = toOpenAIMessages(prompt, sys, hist as any);
   const max = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
   for (const model of NVIDIA_MODELS) {
     try {
-      const text = await callOpenAI('https://integrate.api.nvidia.com/v1/chat/completions', 'Bearer ' + key, model, msgs, max);
+      // stream:false passed via extraBody to ensure non-streaming JSON response
+      const text = await callOpenAI(
+        'https://integrate.api.nvidia.com/v1/chat/completions',
+        'Bearer ' + key, model, msgs, max,
+        {}, // no extra headers
+        { stream: false }, // force non-streaming
+      );
       if (text) { console.log('[AI] NVIDIA/' + model + ' ✓'); return text; }
     } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
   }
   return null;
 }
 
-// ─── Mistral ────────────────────────────────────────────────────
+// ─── Mistral ─────────────────────────────────────────────────────
 const MISTRAL_MODELS = ['mistral-small-latest', 'open-mistral-7b', 'open-mixtral-8x7b'];
-async function tryMistral(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+async function tryMistral(
+  prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>,
+): Promise<string | null> {
   const key = process.env.MISTRAL_API_KEY;
   if (!key) return null;
   const msgs = toOpenAIMessages(prompt, sys, hist as any);
@@ -124,24 +173,33 @@ async function tryMistral(prompt: string, config: Record<string, unknown>, sys?:
   return null;
 }
 
-// ─── OpenRouter ─────────────────────────────────────────────────
-const OR_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'google/gemma-3-27b-it:free', 'qwen/qwen-2.5-72b-instruct:free', 'mistralai/mistral-7b-instruct:free'];
-async function tryOpenRouter(prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>): Promise<string | null> {
+// ─── OpenRouter ──────────────────────────────────────────────────
+const OR_MODELS = [
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemma-3-27b-it:free',
+  'qwen/qwen-2.5-72b-instruct:free',
+  'mistralai/mistral-7b-instruct:free',
+];
+async function tryOpenRouter(
+  prompt: string, config: Record<string, unknown>, sys?: string, hist?: Array<GeminiContent>,
+): Promise<string | null> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return null;
   const msgs = toOpenAIMessages(prompt, sys, hist as any);
   const max = typeof config.maxOutputTokens === 'number' ? config.maxOutputTokens : 2048;
   for (const model of OR_MODELS) {
     try {
-      const text = await callOpenAI('https://openrouter.ai/api/v1/chat/completions', 'Bearer ' + key, model, msgs, max,
-        { 'HTTP-Referer': 'https://planejasp.vercel.app', 'X-Title': 'PlanejaPro' });
+      const text = await callOpenAI(
+        'https://openrouter.ai/api/v1/chat/completions', 'Bearer ' + key, model, msgs, max,
+        { 'HTTP-Referer': 'https://planejasp.vercel.app', 'X-Title': 'PlanejaPro' },
+      );
       if (text) { console.log('[AI] OpenRouter/' + model + ' ✓'); return text; }
     } catch (e) { if ((e as Error).message.startsWith('AUTH_ERROR')) return null; }
   }
   return null;
 }
 
-// ─── Rodízio principal ──────────────────────────────────────────
+// ─── Rodízio principal ───────────────────────────────────────────
 export async function generateWithFallback(
   prompt: string,
   config: Record<string, unknown>,
@@ -162,7 +220,9 @@ export async function generateWithFallback(
 export function isOverloadedError2(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
-  return msg.includes('quota') || msg.includes('503') || msg.includes('overloaded') ||
+  return (
+    msg.includes('quota') || msg.includes('503') || msg.includes('overloaded') ||
     msg.includes('429') || msg.includes('rate limit') || msg.includes('resource_exhausted') ||
-    msg.includes('too many requests') || msg.includes('service unavailable');
+    msg.includes('too many requests') || msg.includes('service unavailable')
+  );
 }
