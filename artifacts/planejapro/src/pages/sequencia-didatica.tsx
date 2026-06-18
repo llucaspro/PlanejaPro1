@@ -26,12 +26,44 @@ function stripMarkdown(text: string): string {
     .replace(/__([^_]+)__/g, "$1");
 }
 
+function renderFrac(num: string, den: string, key: number | string) {
+  return (
+    <span
+      key={key}
+      className="inline-flex flex-col items-center mx-0.5"
+      style={{ verticalAlign: "middle", fontSize: "0.82em", lineHeight: 1 }}
+    >
+      <span style={{ borderBottom: "1.5px solid currentColor", paddingInline: "2px", display: "block", textAlign: "center" }}>{num}</span>
+      <span style={{ paddingInline: "2px", display: "block", textAlign: "center" }}>{den}</span>
+    </span>
+  );
+}
+
+function withFracs(str: string) {
+  const reg = /\b(\d+)\/(\d+)\b/g;
+  const nodes: (string | JSX.Element)[] = [];
+  let last = 0;
+  let ki = 0;
+  let m: RegExpExecArray | null;
+  while ((m = reg.exec(str)) !== null) {
+    if (m.index > last) nodes.push(str.slice(last, m.index));
+    nodes.push(renderFrac(m[1], m[2], ki++));
+    last = m.index + m[0].length;
+  }
+  if (last < str.length) nodes.push(str.slice(last));
+  if (nodes.length === 0) return str;
+  if (nodes.length === 1 && typeof nodes[0] === "string") return nodes[0];
+  return <>{nodes}</>;
+}
+
 function RenderText({ text, className }: { text: string; className?: string }) {
   const parts = text.split(/\*\*([^*]+)\*\*/g);
   return (
     <span className={className}>
-      {parts.map((part, i) =>
-        i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+      {parts.map((p, i) =>
+        i % 2 === 1
+          ? <strong key={i}>{withFracs(p)}</strong>
+          : <span key={i}>{withFracs(p)}</span>
       )}
     </span>
   );
