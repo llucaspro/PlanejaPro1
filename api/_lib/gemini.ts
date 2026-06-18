@@ -1,4 +1,4 @@
-// Direct HTTP calls to Gemini REST API — tries v1beta (new models) then v1 (stable models)
+// Direct HTTP calls to Gemini REST API
 
 interface GeminiPart { text: string }
 interface GeminiContent { role: string; parts: GeminiPart[] }
@@ -10,18 +10,13 @@ interface GeminiResponse {
   error?: { code: number; message: string; status: string };
 }
 
-// Each entry: [apiVersion, modelName]
+// Models confirmed available in this account (gemini-1.5-flash was deprecated)
 const MODEL_ATTEMPTS: Array<[string, string]> = [
   ['v1beta', 'gemini-2.5-flash'],
-  ['v1beta', 'gemini-2.0-flash'],
-  ['v1',     'gemini-1.5-flash'],
-  ['v1beta', 'gemini-1.5-flash'],
-  ['v1',     'gemini-1.5-flash-8b'],
+  ['v1beta', 'gemini-2.5-flash-lite'],
+  ['v1beta', 'gemini-2.0-flash-lite'],
+  ['v1beta', 'gemini-3.5-flash'],
 ];
-
-function isRetryableStatus(status: number): boolean {
-  return status === 429 || status === 503 || status === 502;
-}
 
 export async function generateWithFallback(
   prompt: string,
@@ -36,16 +31,13 @@ export async function generateWithFallback(
     ? [...history as GeminiContent[], { role: 'user', parts: [{ text: prompt }] }]
     : [{ role: 'user', parts: [{ text: prompt }] }];
 
-  const requestBody: Record<string, unknown> = {
-    contents,
-    generationConfig: config,
-  };
-
+  const requestBody: Record<string, unknown> = { contents, generationConfig: config };
   if (systemInstruction) {
     requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
   }
 
   let lastErr: Error = new Error('Nenhum modelo disponível');
+  const quotaErrors: string[] = [];
 
   for (const [apiVersion, model] of MODEL_ATTEMPTS) {
     try {
@@ -60,14 +52,15 @@ export async function generateWithFallback(
 
       if (!res.ok) {
         const errMsg = json.error?.message ?? `HTTP ${res.status}`;
-        console.error(`[gemini] ${apiVersion}/${model} falhou (${res.status}): ${errMsg}`);
-        if (isRetryableStatus(res.status)) {
-          lastErr = new Error(errMsg);
-          continue;
-        }
-        // Model not found → try next; auth error → stop all
-        if (res.status === 403 || res.status === 401) {
+        console.error(`[gemini] ${model} (${res.status}): ${errMsg.slice(0, 120)}`);
+
+        if (res.status === 401 || res.status === 403) {
           throw new Error('Chave Gemini inválida ou sem permissão: ' + errMsg);
+        }
+        if (res.status === 429 || errMsg.toLowerCase().includes('quota')) {
+          quotaErrors.push(model);
+          lastErr = new Error('QUOTA_EXCEEDED: ' + errMsg);
+          continue;
         }
         lastErr = new Error(errMsg);
         continue;
@@ -76,19 +69,25 @@ export async function generateWithFallback(
       const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
       if (!text) {
         const reason = json.candidates?.[0]?.finishReason ?? 'unknown';
-        console.warn(`[gemini] ${apiVersion}/${model} sem texto (finishReason: ${reason})`);
+        console.warn(`[gemini] ${model} sem texto (finishReason: ${reason})`);
         lastErr = new Error(`Modelo sem conteúdo: ${reason}`);
         continue;
       }
 
-      console.log(`[gemini] Sucesso com ${apiVersion}/${model}`);
       return text;
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Chave Gemini')) throw err;
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[gemini] Erro de rede ${apiVersion}/${model}: ${msg}`);
+      if (!msg.startsWith('QUOTA_EXCEEDED')) {
+        console.error(`[gemini] Erro de rede ${model}: ${msg}`);
+      }
       lastErr = err instanceof Error ? err : new Error(msg);
     }
+  }
+
+  // If all models hit quota, return a clear quota error
+  if (quotaErrors.length === MODEL_ATTEMPTS.length) {
+    throw new Error('QUOTA_EXCEEDED: Cota do Gemini esgotada em todos os modelos.');
   }
 
   throw lastErr;
@@ -98,13 +97,13 @@ export function isOverloadedError2(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
   return (
+    msg.includes('quota') ||
+    msg.includes('quota_exceeded') ||
     msg.includes('503') ||
     msg.includes('overloaded') ||
     msg.includes('unavailable') ||
-    msg.includes('high demand') ||
     msg.includes('429') ||
     msg.includes('rate limit') ||
-    msg.includes('quota') ||
     msg.includes('resource_exhausted') ||
     msg.includes('too many requests') ||
     msg.includes('service unavailable')
