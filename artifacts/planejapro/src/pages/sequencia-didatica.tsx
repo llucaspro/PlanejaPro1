@@ -20,6 +20,25 @@ import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/auth-context";
 import jsPDF from "jspdf";
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/_([^_]+)_/g, "$1");
+}
+
+function RenderText({ text, className }: { text: string; className?: string }) {
+  const parts = text.split(/\*\*([^*]+)\*\*/g);
+  return (
+    <span className={className}>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+      )}
+    </span>
+  );
+}
+
 const ANOS = [
   "1º Ano EF", "2º Ano EF", "3º Ano EF", "4º Ano EF", "5º Ano EF",
   "6º Ano EF", "7º Ano EF", "8º Ano EF", "9º Ano EF",
@@ -128,9 +147,9 @@ export default function SequenciaDidatica() {
   const handleCopy = () => {
     if (!result) return;
     const text = result.aulas.map(a =>
-      `AULA ${a.numero}: ${a.titulo}\nObjetivo: ${a.objetivo}\nDesenvolvimento: ${a.desenvolvimento}\nAvaliação: ${a.avaliacao}`
+      `AULA ${a.numero}: ${stripMarkdown(a.titulo)}\nObjetivo: ${stripMarkdown(a.objetivo)}\nDesenvolvimento: ${stripMarkdown(a.desenvolvimento)}\nAvaliação: ${stripMarkdown(a.avaliacao)}`
     ).join("\n\n---\n\n");
-    navigator.clipboard.writeText(`${result.titulo}\n\n${text}`);
+    navigator.clipboard.writeText(`${stripMarkdown(result.titulo)}\n\n${text}`);
     setCopied(true);
     toast.success("Copiado!");
     setTimeout(() => setCopied(false), 2000);
@@ -153,17 +172,17 @@ export default function SequenciaDidatica() {
       y += lines.length * (size * 0.4) + 3;
     };
 
-    addText(result.titulo, 16, true);
+    addText(stripMarkdown(result.titulo), 16, true);
     y += 2;
-    addText(`Objetivo Geral: ${result.objetivoGeral}`, 10);
+    addText(`Objetivo Geral: ${stripMarkdown(result.objetivoGeral)}`, 10);
     y += 4;
 
     result.aulas.forEach((a) => {
       if (y > 240) { doc.addPage(); y = 20; }
-      addText(`Aula ${a.numero}: ${a.titulo}`, 13, true);
-      addText(`Objetivo: ${a.objetivo}`, 10);
-      addText(`Desenvolvimento: ${a.desenvolvimento}`, 10);
-      if (a.avaliacao) addText(`Avaliação: ${a.avaliacao}`, 10);
+      addText(`Aula ${a.numero}: ${stripMarkdown(a.titulo)}`, 13, true);
+      addText(`Objetivo: ${stripMarkdown(a.objetivo)}`, 10);
+      addText(`Desenvolvimento: ${stripMarkdown(a.desenvolvimento)}`, 10);
+      if (a.avaliacao) addText(`Avaliação: ${stripMarkdown(a.avaliacao)}`, 10);
       y += 4;
     });
 
@@ -264,8 +283,8 @@ export default function SequenciaDidatica() {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-8 space-y-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-xl font-bold font-serif">{result.titulo}</h2>
-                  <p className="text-sm text-muted-foreground mt-1">{result.objetivoGeral}</p>
+                  <h2 className="text-xl font-bold font-serif"><RenderText text={result.titulo} /></h2>
+                  <p className="text-sm text-muted-foreground mt-1"><RenderText text={result.objetivoGeral} /></p>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   <Button variant="outline" size="sm" onClick={handleCopy} className="gap-1.5">
@@ -288,7 +307,7 @@ export default function SequenciaDidatica() {
                             <Target className="h-3 w-3" /> Competências
                           </p>
                           <div className="flex flex-wrap gap-1">
-                            {result.competencias.map((c, i) => <Badge key={i} variant="secondary" className="text-xs">{c}</Badge>)}
+                            {result.competencias.map((c, i) => <Badge key={i} variant="secondary" className="text-xs">{stripMarkdown(c)}</Badge>)}
                           </div>
                         </div>
                       )}
@@ -298,7 +317,7 @@ export default function SequenciaDidatica() {
                             <CheckSquare className="h-3 w-3" /> Habilidades
                           </p>
                           <div className="flex flex-wrap gap-1">
-                            {result.habilidades.map((h, i) => <Badge key={i} variant="outline" className="text-xs">{h}</Badge>)}
+                            {result.habilidades.map((h, i) => <Badge key={i} variant="outline" className="text-xs">{stripMarkdown(h)}</Badge>)}
                           </div>
                         </div>
                       )}
@@ -319,8 +338,8 @@ export default function SequenciaDidatica() {
                           {aula.numero}
                         </div>
                         <div>
-                          <p className="font-semibold text-foreground">{aula.titulo}</p>
-                          <p className="text-xs text-muted-foreground">{aula.objetivo}</p>
+                          <p className="font-semibold text-foreground"><RenderText text={aula.titulo} /></p>
+                          <p className="text-xs text-muted-foreground"><RenderText text={aula.objetivo} /></p>
                         </div>
                       </div>
                       <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${aulaAberta === i ? "rotate-90" : ""}`} />
@@ -337,7 +356,7 @@ export default function SequenciaDidatica() {
                             <p className="text-xs font-semibold text-green-700 dark:text-green-300 mb-1 flex items-center gap-1">
                               <BookOpen className="h-3 w-3" /> Abertura
                             </p>
-                            <p className="text-sm text-foreground">{aula.atividadeInicial}</p>
+                            <p className="text-sm text-foreground"><RenderText text={aula.atividadeInicial} /></p>
                           </div>
                         )}
 
@@ -346,14 +365,14 @@ export default function SequenciaDidatica() {
                             <p className="text-xs font-semibold text-muted-foreground uppercase mb-2 flex items-center gap-1">
                               <Users className="h-3 w-3" /> Desenvolvimento
                             </p>
-                            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{aula.desenvolvimento}</p>
+                            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap"><RenderText text={aula.desenvolvimento} /></p>
                           </div>
                         )}
 
                         {aula.encerramento && (
                           <div className="bg-blue-50 dark:bg-blue-950/20 rounded-lg p-3">
                             <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1">Encerramento</p>
-                            <p className="text-sm text-foreground">{aula.encerramento}</p>
+                            <p className="text-sm text-foreground"><RenderText text={aula.encerramento} /></p>
                           </div>
                         )}
 
@@ -362,20 +381,20 @@ export default function SequenciaDidatica() {
                             <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-1 flex items-center gap-1">
                               <CheckSquare className="h-3 w-3" /> Avaliação
                             </p>
-                            <p className="text-sm text-foreground">{aula.avaliacao}</p>
+                            <p className="text-sm text-foreground"><RenderText text={aula.avaliacao} /></p>
                           </div>
                         )}
 
                         {aula.recursos?.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {aula.recursos.map((r, j) => (
-                              <Badge key={j} variant="outline" className="text-xs">{r}</Badge>
+                              <Badge key={j} variant="outline" className="text-xs">{stripMarkdown(r)}</Badge>
                             ))}
                           </div>
                         )}
 
                         {aula.tarefaCasa && (
-                          <p className="text-xs text-muted-foreground">🏠 Tarefa: {aula.tarefaCasa}</p>
+                          <p className="text-xs text-muted-foreground">🏠 Tarefa: <RenderText text={aula.tarefaCasa} /></p>
                         )}
                       </motion.div>
                     )}
@@ -387,7 +406,7 @@ export default function SequenciaDidatica() {
                 <Card className="border-primary/30">
                   <CardHeader><CardTitle className="text-base">Avaliação Final da Sequência</CardTitle></CardHeader>
                   <CardContent>
-                    <p className="text-sm text-foreground">{result.avaliacaoFinal}</p>
+                    <p className="text-sm text-foreground"><RenderText text={result.avaliacaoFinal} /></p>
                   </CardContent>
                 </Card>
               )}
@@ -396,7 +415,7 @@ export default function SequenciaDidatica() {
                 <Card className="border-amber-200 bg-amber-50/50 dark:bg-amber-950/20">
                   <CardContent className="p-4">
                     <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-1">💡 Observações pedagógicas</p>
-                    <p className="text-sm text-foreground">{result.observacoesPedagogicas}</p>
+                    <p className="text-sm text-foreground"><RenderText text={result.observacoesPedagogicas} /></p>
                   </CardContent>
                 </Card>
               )}
