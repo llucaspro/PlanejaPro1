@@ -406,7 +406,7 @@ export default function Admin() {
             <div>
               <h2 className="font-semibold text-foreground">Status dos Provedores de IA</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Rodízio automático: Gemini → Groq → OpenRouter. Quando um esgota, o próximo é usado.
+                Rodízio automático: Gemini → Groq → NVIDIA/DeepSeek → Mistral → OpenRouter. Quando um esgota, o próximo é ativado.
               </p>
             </div>
             <Button size="sm" variant="outline" onClick={loadAiStatus} disabled={aiLoading} className="gap-1.5">
@@ -436,9 +436,11 @@ export default function Admin() {
                 const notConfigured = !info.configured;
 
                 const NAMES: Record<string, { label: string; desc: string; reset: string; link: string }> = {
-                  gemini:     { label: 'Google Gemini', desc: 'gemini-2.5-flash · free tier · 20 req/min', reset: '🔄 Renova a cada 1 minuto', link: 'https://aistudio.google.com/apikey' },
-                  groq:       { label: 'Groq',          desc: 'llama-3.3-70b · free tier · 14.400 req/dia', reset: '🔄 Renova todo dia à meia-noite (UTC)', link: 'https://console.groq.com' },
-                  openrouter: { label: 'OpenRouter',    desc: 'modelos :free · sem limite diário fixo', reset: '🔄 Rate limit por modelo · geralmente por minuto', link: 'https://openrouter.ai' },
+                  gemini:     { label: 'Google Gemini',    desc: 'gemini-2.5-flash · free tier · 20 req/min',               reset: '🔄 Renova a cada 1 minuto',                           link: 'https://aistudio.google.com/apikey' },
+                  groq:       { label: 'Groq',             desc: 'llama-3.3-70b · free tier · 14.400 req/dia',              reset: '🔄 Renova todo dia à meia-noite (UTC)',               link: 'https://console.groq.com' },
+                  nvidia:     { label: 'NVIDIA / DeepSeek',desc: 'deepseek-r1 · créditos grátis iniciais',                  reset: '🔄 Créditos mensais (ver painel NVIDIA)',              link: 'https://build.nvidia.com' },
+                  mistral:    { label: 'Mistral AI',       desc: 'mistral-small-latest · free tier',                        reset: '🔄 Rate limit por minuto (free tier)',                 link: 'https://console.mistral.ai' },
+                  openrouter: { label: 'OpenRouter',       desc: 'modelos :free · sem limite diário fixo',                  reset: '🔄 Rate limit por modelo · geralmente por minuto',    link: 'https://openrouter.ai' },
                 };
                 const meta = NAMES[name] ?? { label: name, desc: '', link: '' };
 
