@@ -1,5 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 
+if (!process.env.GEMINI_API_KEY) {
+  console.error("[gemini] GEMINI_API_KEY não está configurada!");
+}
+
 export const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
@@ -18,8 +22,6 @@ function isRetryableError(err: unknown): boolean {
     msg.includes("quota") ||
     msg.includes("resource_exhausted") ||
     msg.includes("too many requests") ||
-    msg.includes("500") ||
-    msg.includes("internal server error") ||
     msg.includes("service unavailable")
   );
 }
@@ -30,6 +32,10 @@ export async function generateWithFallback(
   systemInstruction?: string,
   history?: Array<{ role: string; parts: Array<{ text: string }> }>,
 ): Promise<string> {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY não configurada no servidor.");
+  }
+
   let lastErr: unknown;
   for (const model of MODELS) {
     try {
@@ -42,10 +48,21 @@ export async function generateWithFallback(
         contents,
         config: systemInstruction ? { ...config, systemInstruction } : config,
       });
-      return response.text ?? "";
+
+      let text: string;
+      try {
+        text = response.text ?? "";
+      } catch {
+        text = response.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      }
+
+      if (text) return text;
+
+      console.warn(`[gemini] Modelo ${model} retornou texto vazio, tentando próximo.`);
+      lastErr = new Error(`Modelo ${model} retornou resposta vazia`);
     } catch (err) {
+      console.error(`[gemini] Erro no modelo ${model}:`, err instanceof Error ? err.message : err);
       lastErr = err;
-      // Always try next fallback model regardless of error type
     }
   }
   throw lastErr;
