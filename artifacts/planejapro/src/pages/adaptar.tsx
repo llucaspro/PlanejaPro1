@@ -16,6 +16,25 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
 import { useAuth } from "@/contexts/auth-context";
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/_([^_]+)_/g, "$1");
+}
+
+function RenderText({ text, className }: { text: string; className?: string }) {
+  const parts = text.split(/\*\*([^*]+)\*\*/g);
+  return (
+    <span className={className}>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+      )}
+    </span>
+  );
+}
+
 const TIPOS_ADAPTACAO = [
   {
     value: "simplificar",
@@ -261,7 +280,7 @@ export default function Adaptar() {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-8 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-bold">{result.titulo}</h2>
+                  <h2 className="text-lg font-bold"><RenderText text={result.titulo} /></h2>
                   {tipoSelecionado && (
                     <span className="text-sm text-muted-foreground">
                       {tipoSelecionado.emoji} {tipoSelecionado.label}
@@ -283,7 +302,7 @@ export default function Adaptar() {
                 <CardHeader><CardTitle className="text-base">Conteúdo adaptado</CardTitle></CardHeader>
                 <CardContent>
                   <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-                    {result.conteudoAdaptado}
+                    <RenderText text={result.conteudoAdaptado} />
                   </p>
                 </CardContent>
               </Card>
@@ -292,7 +311,7 @@ export default function Adaptar() {
                 <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
                   <CardHeader><CardTitle className="text-base text-amber-800 dark:text-amber-300">💡 Observações para o professor</CardTitle></CardHeader>
                   <CardContent>
-                    <p className="text-sm text-amber-900 dark:text-amber-200">{result.observacoesPedagogicas}</p>
+                    <p className="text-sm text-amber-900 dark:text-amber-200"><RenderText text={result.observacoesPedagogicas} /></p>
                   </CardContent>
                 </Card>
               )}
@@ -305,7 +324,7 @@ export default function Adaptar() {
                       {result.diferencas.map((d, i) => (
                         <li key={i} className="flex gap-2 text-sm">
                           <span className="text-primary">✓</span>
-                          <span>{d}</span>
+                          <RenderText text={d} />
                         </li>
                       ))}
                     </ul>
