@@ -108,8 +108,9 @@ function withFracs(str: string) {
   return <>{nodes}</>;
 }
 
-function RenderText({ text, className }: { text: string; className?: string }) {
-  const parts = text.split(/\*\*([^*]+)\*\*/g);
+function RenderText({ text, className }: { text: unknown; className?: string }) {
+  const safe = typeof text === 'string' ? text : text == null ? '' : String(text);
+  const parts = safe.split(/\*\*([^*]+)\*\*/g);
   return (
     <span className={className}>
       {parts.map((p, i) =>
