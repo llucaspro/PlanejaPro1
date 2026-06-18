@@ -81,6 +81,24 @@ function PremiumOverlay() {
   );
 }
 
+function RenderMarkdown({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("\n").map((line, li) => {
+        const parts = line.split(/\*\*([^*]+)\*\*/g);
+        return (
+          <span key={li}>
+            {li > 0 && "\n"}
+            {parts.map((part, i) =>
+              i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+            )}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
   return (
@@ -96,7 +114,9 @@ function MessageBubble({ message }: { message: Message }) {
             : "bg-card border border-border text-foreground rounded-bl-sm"
         }`}
       >
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        <p className="whitespace-pre-wrap">
+          {isUser ? message.content : <RenderMarkdown text={message.content} />}
+        </p>
         <p className={`text-xs mt-1.5 ${isUser ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
           {message.timestamp.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
         </p>
