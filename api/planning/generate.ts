@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { eq } from "drizzle-orm";
-import { getDb, usersTable, aiUsageTable } from "../_lib/db";
+import { getDb, usersTable, aiUsageTable, ensureTables } from "../_lib/db";
 import { verifyToken, extractBearerToken } from "../_lib/auth";
 import { generateWithFallback, isOverloadedError2 } from "../_lib/gemini";
 
@@ -43,6 +43,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch {
     return res.status(401).json({ error: "Token inválido ou expirado. Faça login novamente." });
   }
+
+  await ensureTables();
 
   const db = getDb();
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId));
@@ -89,61 +91,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 Retorne JSON com exatamente estas chaves (sem markdown, apenas JSON puro):
 tema, objetivoGeral, objetivosEspecificos (array), competencias (array), habilidades (array), metodologia, sequenciaDidatica (array), atividadeInicial, desenvolvimento, atividadePratica, encerramento, avaliacao, criteriosAvaliativos (array), estrategiasInclusivas, adaptacoesDificuldades, recursosNecessarios (array), tarefaCasa, observacoesPedagogicas, versaoResumida, sugestoesExtras (array)`;
 
+  let content: string;
   try {
-    let content = await generateWithFallback(
+    content = await generateWithFallback(
       SYSTEM_PROMPT + "\n\n" + userPrompt,
       { maxOutputTokens: 8192, temperature: 0.7 },
     );
-
-    content = content.trim();
-    if (content.startsWith("```")) {
-      content = content.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
-    }
-    if (!content) return res.status(500).json({ error: "IA não retornou conteúdo" });
-
-    let planning: Record<string, unknown>;
-    try {
-      planning = JSON.parse(content) as Record<string, unknown>;
-    } catch {
-      return res.status(500).json({ error: "IA retornou formato inválido. Tente novamente." });
-    }
-
-    const arrayFields = ["objetivosEspecificos", "competencias", "habilidades", "sequenciaDidatica", "criteriosAvaliativos", "recursosNecessarios", "sugestoesExtras"];
-    const stringFields = ["tema", "objetivoGeral", "metodologia", "atividadeInicial", "desenvolvimento", "atividadePratica", "encerramento", "avaliacao", "estrategiasInclusivas", "adaptacoesDificuldades", "tarefaCasa", "observacoesPedagogicas", "versaoResumida"];
-
-    function anyToString(v: unknown): string {
-      if (typeof v === "string") return v;
-      if (v === null || v === undefined) return "";
-      if (Array.isArray(v)) return v.map(anyToString).join(" | ");
-      if (typeof v === "object") return Object.entries(v as Record<string, unknown>).map(([k, val]) => `${k}: ${anyToString(val)}`).join(" | ");
-      return String(v);
-    }
-
-    for (const field of arrayFields) {
-      if (!Array.isArray(planning[field])) planning[field] = planning[field] ? [anyToString(planning[field])] : [];
-      else planning[field] = (planning[field] as unknown[]).map(anyToString);
-    }
-    for (const field of stringFields) {
-      if (typeof planning[field] !== "string") planning[field] = planning[field] != null ? anyToString(planning[field]) : "Não gerado";
-    }
-
-    const estimatedTokens = Math.round((SYSTEM_PROMPT.length + userPrompt.length + JSON.stringify(planning).length) / 4);
-
-    if (!user.isPremium) {
-      await db.update(usersTable)
-        .set({ freeGenerationsRemaining: user.freeGenerationsRemaining - 1, updatedAt: new Date() })
-        .where(eq(usersTable.id, user.id));
-    }
-
-    await db.insert(aiUsageTable).values({ userId: user.id, requestType: "planning_generate", estimatedTokens });
-
-    return res.status(200).json({
-      ...planning,
-      _meta: {
-        freeGenerationsRemaining: user.isPremium ? null : user.freeGenerationsRemaining - 1,
-        isPremium: user.isPremium,
-      },
-    });
   } catch (err) {
     console.error("[planning/generate] Erro ao chamar IA:", err instanceof Error ? err.message : err);
     const isOverloaded = isOverloadedError2(err);
@@ -153,4 +106,58 @@ tema, objetivoGeral, objetivosEspecificos (array), competencias (array), habilid
       : "Falha ao gerar planejamento. Tente novamente.";
     return res.status(status).json({ error: message });
   }
+
+  content = content.trim();
+  if (content.startsWith("```")) {
+    content = content.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "").trim();
+  }
+  if (!content) return res.status(500).json({ error: "IA não retornou conteúdo" });
+
+  let planning: Record<string, unknown>;
+  try {
+    planning = JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    return res.status(500).json({ error: "IA retornou formato inválido. Tente novamente." });
+  }
+
+  const arrayFields = ["objetivosEspecificos", "competencias", "habilidades", "sequenciaDidatica", "criteriosAvaliativos", "recursosNecessarios", "sugestoesExtras"];
+  const stringFields = ["tema", "objetivoGeral", "metodologia", "atividadeInicial", "desenvolvimento", "atividadePratica", "encerramento", "avaliacao", "estrategiasInclusivas", "adaptacoesDificuldades", "tarefaCasa", "observacoesPedagogicas", "versaoResumida"];
+
+  function anyToString(v: unknown): string {
+    if (typeof v === "string") return v;
+    if (v === null || v === undefined) return "";
+    if (Array.isArray(v)) return v.map(anyToString).join(" | ");
+    if (typeof v === "object") return Object.entries(v as Record<string, unknown>).map(([k, val]) => `${k}: ${anyToString(val)}`).join(" | ");
+    return String(v);
+  }
+
+  for (const field of arrayFields) {
+    if (!Array.isArray(planning[field])) planning[field] = planning[field] ? [anyToString(planning[field])] : [];
+    else planning[field] = (planning[field] as unknown[]).map(anyToString);
+  }
+  for (const field of stringFields) {
+    if (typeof planning[field] !== "string") planning[field] = planning[field] != null ? anyToString(planning[field]) : "Não gerado";
+  }
+
+  const estimatedTokens = Math.round((SYSTEM_PROMPT.length + userPrompt.length + JSON.stringify(planning).length) / 4);
+
+  // DB writes isoladas: não bloqueiam a resposta se falharem
+  try {
+    if (!user.isPremium) {
+      await db.update(usersTable)
+        .set({ freeGenerationsRemaining: user.freeGenerationsRemaining - 1, updatedAt: new Date() })
+        .where(eq(usersTable.id, user.id));
+    }
+    await db.insert(aiUsageTable).values({ userId: user.id, requestType: "planning_generate", estimatedTokens });
+  } catch (dbErr) {
+    console.error("[planning/generate] Erro ao salvar no banco (não fatal):", dbErr instanceof Error ? dbErr.message : dbErr);
+  }
+
+  return res.status(200).json({
+    ...planning,
+    _meta: {
+      freeGenerationsRemaining: user.isPremium ? null : Math.max(0, user.freeGenerationsRemaining - 1),
+      isPremium: user.isPremium,
+    },
+  });
 }
