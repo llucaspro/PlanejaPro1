@@ -3,7 +3,8 @@ import { motion } from "framer-motion";
 import {
   Users, Crown, Shield, BarChart3, Search, XCircle, RotateCcw, Ban,
   Unlock, Plus, Minus, ChevronDown, ChevronUp, Clock, FileQuestion,
-  Sparkles, ClipboardList, BookMarked, FileText, Wand2,
+  Sparkles, ClipboardList, BookMarked, FileText, Wand2, Zap, RefreshCw,
+  CheckCircle, AlertTriangle, XOctagon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +51,19 @@ interface AuditLog {
   createdAt: string;
 }
 
+interface AIProviderStatus {
+  configured: boolean;
+  status: string;
+}
+interface AIStatus {
+  providers: {
+    gemini: AIProviderStatus;
+    groq: AIProviderStatus;
+    openrouter: AIProviderStatus;
+  };
+  hasDb: boolean;
+}
+
 const ACTION_LABELS: Record<string, string> = {
   grant_premium: "Premium liberado",
   revoke_premium: "Premium revogado",
@@ -79,6 +93,8 @@ export default function Admin() {
   const [loadingAction, setLoadingAction] = useState<number | null>(null);
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
   const [daysInput, setDaysInput] = useState<Record<number, string>>({});
+  const [aiStatus, setAiStatus] = useState<AIStatus | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const apiFetch = async (path: string, options?: RequestInit) => {
     const res = await fetch(path, {
@@ -104,12 +120,21 @@ export default function Admin() {
     try { setLogs(await apiFetch("/api/admin/audit-logs") as AuditLog[]); } catch {}
   };
 
-  useEffect(() => { if (token) { loadStats(); loadUsers(); loadLogs(); } }, [token]);
+  useEffect(() => { if (token) { loadStats(); loadUsers(); loadLogs(); loadAiStatus(); } }, [token]);
 
   useEffect(() => {
     const t = setTimeout(() => { if (token) loadUsers(search); }, 400);
     return () => clearTimeout(t);
   }, [search]);
+
+  const loadAiStatus = async () => {
+    setAiLoading(true);
+    try {
+      const res = await fetch('/api/healthz/gemini', { headers: { Authorization: `Bearer ${token}` } });
+      setAiStatus(await res.json() as AIStatus);
+    } catch { toast.error('Erro ao verificar status das IAs'); }
+    finally { setAiLoading(false); }
+  };
 
   const doAction = async (userId: number, action: string, extra?: Record<string, unknown>) => {
     setLoadingAction(userId);
@@ -149,10 +174,11 @@ export default function Admin() {
       </div>
 
       <Tabs defaultValue="dashboard">
-        <TabsList className="grid grid-cols-3 w-full max-w-md">
+        <TabsList className="grid grid-cols-4 w-full max-w-xl">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="users">Usuários</TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="ia" className="gap-1"><Zap className="h-3.5 w-3.5" />IA</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="mt-4">
@@ -373,6 +399,92 @@ export default function Admin() {
               </CardContent>
             </Card>
           ))}
+        </TabsContent>
+
+        <TabsContent value="ia" className="mt-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-foreground">Status dos Provedores de IA</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Rodízio automático: Gemini → Groq → OpenRouter. Quando um esgota, o próximo é usado.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={loadAiStatus} disabled={aiLoading} className="gap-1.5">
+              <RefreshCw className={"h-3.5 w-3.5" + (aiLoading ? " animate-spin" : "")} />
+              Atualizar
+            </Button>
+          </div>
+
+          {!aiStatus && !aiLoading && (
+            <p className="text-center text-muted-foreground py-8 text-sm">Clique em Atualizar para verificar</p>
+          )}
+
+          {aiLoading && (
+            <div className="space-y-3">
+              {[1,2,3].map(i => (
+                <Card key={i}><CardContent className="p-4"><div className="h-16 bg-muted animate-pulse rounded" /></CardContent></Card>
+              ))}
+            </div>
+          )}
+
+          {aiStatus && !aiLoading && (
+            <div className="space-y-3">
+              {(Object.entries(aiStatus.providers) as Array<[string, AIProviderStatus]>).map(([name, info]) => {
+                const isOk = info.status.startsWith('✅');
+                const isWarn = info.status.startsWith('⚠️');
+                const isErr = info.status.startsWith('❌') || info.status === 'not tested';
+                const notConfigured = !info.configured;
+
+                const NAMES: Record<string, { label: string; desc: string; link: string }> = {
+                  gemini:     { label: 'Google Gemini', desc: 'gemini-2.5-flash • free tier 20 req/min', link: 'https://aistudio.google.com/apikey' },
+                  groq:       { label: 'Groq',          desc: 'llama-3.3-70b • free tier 14.400 req/dia', link: 'https://console.groq.com' },
+                  openrouter: { label: 'OpenRouter',    desc: 'modelos :free ilimitados', link: 'https://openrouter.ai' },
+                };
+                const meta = NAMES[name] ?? { label: name, desc: '', link: '' };
+
+                return (
+                  <Card key={name} className={isOk ? 'border-green-200 dark:border-green-900' : isWarn ? 'border-amber-200 dark:border-amber-900' : notConfigured ? 'border-dashed opacity-70' : 'border-red-200 dark:border-red-900'}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3">
+                        <div className={"mt-0.5 flex-shrink-0 " + (isOk ? 'text-green-600' : isWarn ? 'text-amber-500' : 'text-muted-foreground')}>
+                          {isOk ? <CheckCircle className="h-5 w-5" /> : isWarn ? <AlertTriangle className="h-5 w-5" /> : <XOctagon className="h-5 w-5" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-sm">{meta.label}</span>
+                            {info.configured
+                              ? <Badge variant="outline" className="text-xs border-green-300 text-green-700">Configurado</Badge>
+                              : <Badge variant="outline" className="text-xs border-dashed text-muted-foreground">Sem chave</Badge>
+                            }
+                            {isOk && <Badge className="text-xs bg-green-100 text-green-800">Online</Badge>}
+                            {isWarn && <Badge className="text-xs bg-amber-100 text-amber-800">Cota esgotada</Badge>}
+                            {isErr && info.configured && <Badge variant="destructive" className="text-xs">Erro</Badge>}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">{meta.desc}</p>
+                          {info.configured && (
+                            <p className="text-xs mt-1.5 font-mono bg-muted rounded px-2 py-1 break-all">{info.status.slice(0, 120)}</p>
+                          )}
+                          {!info.configured && (
+                            <a href={meta.link} target="_blank" rel="noopener noreferrer" className="text-xs text-primary underline mt-1 inline-block">
+                              Obter chave grátis →
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+
+              <Card className="bg-muted/30">
+                <CardContent className="p-3">
+                  <p className="text-xs text-muted-foreground">
+                    🗄️ Banco de dados: {aiStatus.hasDb ? <span className="text-green-600 font-medium">Conectado</span> : <span className="text-red-600 font-medium">Não configurado</span>}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>
