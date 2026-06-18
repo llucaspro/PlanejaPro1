@@ -61,3 +61,47 @@ function getPool(): Pool {
 export function getDb() {
   return drizzle(getPool(), { schema });
 }
+
+// ── Auto-migrate: garante que as tabelas existam em produção ─────────────────
+
+let _tablesEnsured = false;
+
+export async function ensureTables(): Promise<void> {
+  if (_tablesEnsured) return;
+  const pool = getPool();
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        firebase_uid TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        name TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        is_premium BOOLEAN NOT NULL DEFAULT FALSE,
+        free_generations_remaining INTEGER NOT NULL DEFAULT 3,
+        premium_granted_at TIMESTAMP,
+        premium_expires_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY,
+        admin_email TEXT NOT NULL,
+        action TEXT NOT NULL,
+        target_user_id INTEGER,
+        metadata JSONB,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS ai_usage (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        request_type TEXT NOT NULL,
+        estimated_tokens INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `);
+    _tablesEnsured = true;
+  } catch (err) {
+    console.error("[db] ensureTables error:", err instanceof Error ? err.message : err);
+  }
+}
