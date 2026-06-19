@@ -70,7 +70,7 @@ Retorne APENAS JSON válido (sem markdown):
     }
   ]
 }`;
-  return { prompt, requestType: "activities_generate", config: { maxOutputTokens: 8192, temperature: 0.7 } };
+  return { prompt, requestType: "activities_generate", config: { maxOutputTokens: 4096, temperature: 0.7 } };
 }
 
 async function handleAdapt(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: Record<string, unknown> }> {
@@ -105,7 +105,7 @@ Retorne APENAS JSON válido (sem markdown):
   "observacoesPedagogicas": "Dicas para o professor",
   "diferencas": ["Diferença 1", "Diferença 2"]
 }`;
-  return { prompt, requestType: "adapt_generate", config: { maxOutputTokens: 8192, temperature: 0.6 } };
+  return { prompt, requestType: "adapt_generate", config: { maxOutputTokens: 4096, temperature: 0.6 } };
 }
 
 async function handleSequences(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: Record<string, unknown> }> {
@@ -149,7 +149,8 @@ Retorne APENAS JSON válido (sem markdown):
   "avaliacaoFinal": "Avaliação final da sequência",
   "observacoesPedagogicas": "Dicas gerais"
 }`;
-  return { prompt, requestType: "sequence_generate", config: { maxOutputTokens: 8192, temperature: 0.7 } };
+  const seqTokens = Math.min(2048 + numAulas * 400, 6144);
+  return { prompt, requestType: "sequence_generate", config: { maxOutputTokens: seqTokens, temperature: 0.7 } };
 }
 
 async function handleReports(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: Record<string, unknown> }> {
