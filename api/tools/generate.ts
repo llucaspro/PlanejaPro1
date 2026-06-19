@@ -25,7 +25,7 @@ function s(v: unknown, max = MAX_FIELD): string {
   return typeof v === "string" ? v.trim().slice(0, max) : "";
 }
 
-async function handleActivities(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: object }> {
+async function handleActivities(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: Record<string, unknown> }> {
   if (!body?.disciplina || !body?.anoSerie || !body?.tema)
     throw new Error("Campos obrigatórios: disciplina, anoSerie, tema");
 
@@ -73,7 +73,7 @@ Retorne APENAS JSON válido (sem markdown):
   return { prompt, requestType: "activities_generate", config: { maxOutputTokens: 8192, temperature: 0.7 } };
 }
 
-async function handleAdapt(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: object }> {
+async function handleAdapt(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: Record<string, unknown> }> {
   if (!body?.conteudo || !body?.tipo)
     throw new Error("Campos obrigatórios: conteudo, tipo");
 
@@ -108,7 +108,7 @@ Retorne APENAS JSON válido (sem markdown):
   return { prompt, requestType: "adapt_generate", config: { maxOutputTokens: 8192, temperature: 0.6 } };
 }
 
-async function handleSequences(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: object }> {
+async function handleSequences(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: Record<string, unknown> }> {
   if (!body?.disciplina || !body?.anoSerie || !body?.tema)
     throw new Error("Campos obrigatórios: disciplina, anoSerie, tema");
 
@@ -152,7 +152,7 @@ Retorne APENAS JSON válido (sem markdown):
   return { prompt, requestType: "sequence_generate", config: { maxOutputTokens: 8192, temperature: 0.7 } };
 }
 
-async function handleReports(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: object }> {
+async function handleReports(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: Record<string, unknown> }> {
   if (!body?.tipo || !body?.informacoes)
     throw new Error("Campos obrigatórios: tipo, informacoes");
 
@@ -188,7 +188,7 @@ Retorne APENAS JSON válido (sem markdown):
   return { prompt, requestType: "report_generate", config: { maxOutputTokens: 4096, temperature: 0.6 } };
 }
 
-async function handleImprove(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: object }> {
+async function handleImprove(body: Record<string, unknown>): Promise<{ prompt: string; requestType: string; config: Record<string, unknown> }> {
   if (!body?.planejamento)
     throw new Error("Campo obrigatório: planejamento");
 
@@ -283,7 +283,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!type) return res.status(400).json({ error: "Campo obrigatório: type (activities|adapt|sequences|reports|improve)" });
 
-  let promptData: { prompt: string; requestType: string; config: object };
+  let promptData: { prompt: string; requestType: string; config: Record<string, unknown> };
   try {
     switch (type) {
       case "activities": promptData = await handleActivities(body); break;
