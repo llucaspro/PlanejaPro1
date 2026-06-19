@@ -1,3 +1,4 @@
+SHA:f379b2cb73c5ed83ed84c2d9f2aafc7644337b2a
 // Rodízio automático de IAs gratuitas
 // Ordem: Gemini → Groq → NVIDIA/DeepSeek → Mistral → OpenRouter
 
@@ -64,6 +65,16 @@ async function callOpenAI(
   });
   const json = await safeJson(res);
   const bodyStr = JSON.stringify(json);
+
+  // OpenRouter (and some providers) return HTTP 200 but embed errors in json.error
+  const embeddedErr = (json as any)?.error;
+  if (embeddedErr) {
+    const errMsg = String(embeddedErr?.message ?? '').toLowerCase();
+    const errCode = Number(embeddedErr?.code ?? 0);
+    if (errCode === 429 || isQuotaErr(res.status, errMsg)) return null; // quota: try next
+    console.error('[ai] ' + model + ' body-error:', bodyStr.slice(0, 120));
+    return null; // provider error: skip this model
+  }
 
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) throw new Error('AUTH_ERROR:' + model);
