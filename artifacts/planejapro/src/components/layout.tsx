@@ -3,14 +3,19 @@ import {
   BookOpen, PlusCircle, FolderOpen, MessageSquare,
   Upload, Settings, Menu, X, LogOut, Shield, Sparkles,
   FileQuestion, ClipboardList, Wand2, Database,
-  BookMarked, FileText, ChevronDown, ChevronUp,
+  BookMarked, FileText, ChevronDown, ChevronUp, Download,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "./ui/sheet";
 import { Badge } from "./ui/badge";
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "sonner";
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
 
 const NAV_MAIN = [
   { href: "/", label: "Início", icon: BookOpen },
@@ -33,7 +38,39 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [ferramentasOpen, setFerramentasOpen] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
   const { user, logout } = useAuth();
+
+  useEffect(() => {
+    // Detect if already installed (running as standalone PWA)
+    if (window.matchMedia("(display-mode: standalone)").matches) {
+      setIsInstalled(true);
+      return;
+    }
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    window.addEventListener("appinstalled", () => setIsInstalled(true));
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installPrompt) {
+      toast.info("Para instalar: toque em ⋮ (menu) → 'Adicionar à tela inicial'");
+      return;
+    }
+    await installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") {
+      setInstallPrompt(null);
+      setIsInstalled(true);
+      toast.success("App instalado com sucesso!");
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -50,6 +87,22 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const isFerramentaActive = NAV_FERRAMENTAS.some(item =>
     location === item.href || (item.href !== "/" && location.startsWith(item.href))
   );
+
+  const InstallButton = () => {
+    if (isInstalled) return null;
+    return (
+      <button
+        onClick={handleInstall}
+        className="w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors cursor-pointer text-muted-foreground hover:bg-secondary hover:text-foreground"
+      >
+        <Download className="h-5 w-5 flex-shrink-0 text-indigo-500" />
+        <span className="flex-1 text-left text-sm font-medium">Instalar App</span>
+        <span className="text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-medium">
+          NOVO
+        </span>
+      </button>
+    );
+  };
 
   const NavLinks = () => (
     <div className="flex flex-col flex-1">
@@ -140,6 +193,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </div>
           </Link>
         )}
+
+        <InstallButton />
       </div>
 
       <div className="py-4 space-y-1 border-t">
