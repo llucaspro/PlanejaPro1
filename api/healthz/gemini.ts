@@ -2,16 +2,40 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const PROMPT = 'Responda apenas: OK';
 
-async function testOpenAI(url: string, key: string, model: string, extraHeaders?: Record<string,string>) {
+async function testOpenAI(url: string, key: string, model: string, extraHeaders?: Record<string,string>): Promise<string> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key, ...extraHeaders },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: PROMPT }], max_tokens: 10 }),
+    // stream: false is critical for NVIDIA — without it the response is SSE, not JSON
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: PROMPT }], max_tokens: 10, stream: false }),
   });
-  const j = await res.json() as Record<string, unknown>;
-  if (res.ok) return '✅ OK — ' + ((j as any)?.choices?.[0]?.message?.content ?? '?');
-  const msg = ((j as any)?.error?.message ?? JSON.stringify(j)).slice(0, 100);
-  if (res.status === 429 || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate')) return '⚠️ cota esgotada — ' + msg;
+
+  let j: Record<string, unknown>;
+  try {
+    j = await res.json() as Record<string, unknown>;
+  } catch {
+    const text = await res.text().catch(() => '');
+    return '❌ resposta não-JSON: ' + text.slice(0, 80);
+  }
+
+  // OpenRouter (and some others) return 200 but embed errors in the body
+  const embeddedErr = (j as any)?.error;
+  if (embeddedErr) {
+    const msg = String(embeddedErr?.message ?? JSON.stringify(embeddedErr)).slice(0, 120);
+    const code = Number(embeddedErr?.code ?? 0);
+    const low = msg.toLowerCase();
+    if (code === 429 || low.includes('quota') || low.includes('rate limit') || low.includes('exceeded'))
+      return '⚠️ cota esgotada — ' + msg;
+    if (low.includes('provider'))
+      return '⚠️ provedor temporariamente indisponível — ' + msg;
+    return '❌ erro: ' + msg;
+  }
+
+  if (res.ok) return '✅ OK — ' + (((j as any)?.choices?.[0]?.message?.content) ?? '?');
+
+  const msg = String((j as any)?.error?.message ?? JSON.stringify(j)).slice(0, 100);
+  if (res.status === 429 || msg.toLowerCase().includes('quota') || msg.toLowerCase().includes('rate'))
+    return '⚠️ cota esgotada — ' + msg;
   return '❌ ' + res.status + ' — ' + msg;
 }
 
@@ -35,9 +59,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     openrouter: { configured: !!keys.openrouter, status: 'not tested' },
   };
 
-  // Test each provider concurrently
   await Promise.all([
-    // Gemini
+    // Gemini (native API, not OpenAI-compatible)
     keys.gemini ? (async () => {
       try {
         const r = await fetch(
@@ -48,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const j = await r.json() as Record<string,unknown>;
         if (r.ok) { providers.gemini.status = '✅ OK — ' + ((j as any)?.candidates?.[0]?.content?.parts?.[0]?.text ?? '?'); }
         else {
-          const msg = ((j as any)?.error?.message ?? JSON.stringify(j)).slice(0,100);
+          const msg = String((j as any)?.error?.message ?? JSON.stringify(j)).slice(0,100);
           providers.gemini.status = (r.status===429||msg.includes('quota')) ? '⚠️ cota esgotada — ' + msg : '❌ ' + r.status + ' — ' + msg;
         }
       } catch(e) { providers.gemini.status = '❌ erro: ' + (e instanceof Error ? e.message : String(e)); }
@@ -60,7 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       catch(e) { providers.groq.status = '❌ erro: ' + (e instanceof Error ? e.message : String(e)); }
     })() : Promise.resolve(),
 
-    // NVIDIA / DeepSeek
+    // NVIDIA / DeepSeek — stream:false sent in body via testOpenAI
     keys.nvidia ? (async () => {
       try { providers.nvidia.status = await testOpenAI('https://integrate.api.nvidia.com/v1/chat/completions', keys.nvidia!, 'deepseek-ai/deepseek-r1'); }
       catch(e) { providers.nvidia.status = '❌ erro: ' + (e instanceof Error ? e.message : String(e)); }
@@ -72,10 +95,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       catch(e) { providers.mistral.status = '❌ erro: ' + (e instanceof Error ? e.message : String(e)); }
     })() : Promise.resolve(),
 
-    // OpenRouter
+    // OpenRouter — try a fast free model
     keys.openrouter ? (async () => {
-      try { providers.openrouter.status = await testOpenAI('https://openrouter.ai/api/v1/chat/completions', keys.openrouter!, 'meta-llama/llama-3.3-70b-instruct:free', {'HTTP-Referer':'https://planejasp.vercel.app','X-Title':'PlanejaPro'}); }
-      catch(e) { providers.openrouter.status = '❌ erro: ' + (e instanceof Error ? e.message : String(e)); }
+      try {
+        providers.openrouter.status = await testOpenAI(
+          'https://openrouter.ai/api/v1/chat/completions', keys.openrouter!,
+          'mistralai/mistral-7b-instruct:free',
+          {'HTTP-Referer':'https://planejasp.vercel.app','X-Title':'PlanejaPro'}
+        );
+      } catch(e) { providers.openrouter.status = '❌ erro: ' + (e instanceof Error ? e.message : String(e)); }
     })() : Promise.resolve(),
   ]);
 
